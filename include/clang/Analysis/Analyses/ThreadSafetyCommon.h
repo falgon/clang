@@ -287,11 +287,9 @@ public:
   }
 
   const ValueDecl* valueDecl() const {
-    if (Negated || CapExpr == nullptr)
+    if (Negated)
       return nullptr;
     if (auto *P = dyn_cast<til::Project>(CapExpr))
-      return P->clangDecl();
-    if (auto *P = dyn_cast<til::LiteralPtr>(CapExpr))
       return P->clangDecl();
     return nullptr;
   }

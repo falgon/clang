@@ -19,7 +19,6 @@
 #include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Lex/Lexer.h"
-#include "clang/Lex/PTHManager.h"
 #include "clang/Lex/Preprocessor.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
@@ -106,7 +105,7 @@ public:
   }
 
   unsigned getRepresentationLength() const {
-    return Kind == IsNoExist ? 0 : 4 * 8;
+    return Kind == IsNoExist ? 0 : 4 + 4 + 2 + 8 + 8;
   }
 };
 

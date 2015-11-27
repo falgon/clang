@@ -26,7 +26,6 @@
 #include "clang/Sema/Sema.h"
 #include "clang/Sema/SemaDiagnostic.h"
 #include "llvm/Support/SaveAndRestore.h"
-
 using namespace clang;
 using namespace clang::serialization;
 
@@ -130,6 +129,7 @@ namespace clang {
     public:
       RedeclarableResult(GlobalDeclID FirstID, Decl *MergeWith, bool IsKeyDecl)
           : FirstID(FirstID), MergeWith(MergeWith), IsKeyDecl(IsKeyDecl) {}
+      ~RedeclarableResult() {}
 
       /// \brief Retrieve the first ID.
       GlobalDeclID getFirstID() const { return FirstID; }
@@ -161,7 +161,7 @@ namespace clang {
     public:
       FindExistingResult(ASTReader &Reader)
           : Reader(Reader), New(nullptr), Existing(nullptr), AddResult(false),
-            AnonymousDeclNumber(0), TypedefNameForLinkage(nullptr) {}
+            AnonymousDeclNumber(0), TypedefNameForLinkage(0) {}
 
       FindExistingResult(ASTReader &Reader, NamedDecl *New, NamedDecl *Existing,
                          unsigned AnonymousDeclNumber,
@@ -293,7 +293,6 @@ namespace clang {
     DeclID VisitTemplateDecl(TemplateDecl *D);
     RedeclarableResult VisitRedeclarableTemplateDecl(RedeclarableTemplateDecl *D);
     void VisitClassTemplateDecl(ClassTemplateDecl *D);
-    void VisitBuiltinTemplateDecl(BuiltinTemplateDecl *D);
     void VisitVarTemplateDecl(VarTemplateDecl *D);
     void VisitFunctionTemplateDecl(FunctionTemplateDecl *D);
     void VisitTemplateTemplateParmDecl(TemplateTemplateParmDecl *D);
@@ -309,6 +308,10 @@ namespace clang {
     void VisitStaticAssertDecl(StaticAssertDecl *D);
     void VisitBlockDecl(BlockDecl *BD);
     void VisitCapturedDecl(CapturedDecl *CD);
+//@@
+	void VisitExecuteDecl(ExecuteDecl *D);
+	void VisitDefDecl(DefDecl *D);
+//@@
     void VisitEmptyDecl(EmptyDecl *D);
 
     std::pair<uint64_t, uint64_t> VisitDeclContext(DeclContext *DC);
@@ -372,7 +375,7 @@ namespace clang {
       }
     }
   };
-} // end namespace clang
+}
 
 namespace {
 /// Iterator over the redeclarations of a declaration that have already
@@ -408,8 +411,7 @@ public:
     return A.Current != B.Current;
   }
 };
-} // end anonymous namespace
-
+}
 template<typename DeclT>
 llvm::iterator_range<MergedRedeclIterator<DeclT>> merged_redecls(DeclT *D) {
   return llvm::iterator_range<MergedRedeclIterator<DeclT>>(
@@ -884,7 +886,7 @@ void ASTDeclReader::VisitObjCMethodDecl(ObjCMethodDecl *MD) {
 }
 
 void ASTDeclReader::VisitObjCTypeParamDecl(ObjCTypeParamDecl *D) {
-  VisitTypedefNameDecl(D);
+  RedeclarableResult Redecl = VisitTypedefNameDecl(D);
 
   D->Variance = Record[Idx++];
   D->Index = Record[Idx++];
@@ -1098,6 +1100,7 @@ void ASTDeclReader::VisitObjCImplementationDecl(ObjCImplementationDecl *D) {
     D->IvarInitializers = Reader.ReadCXXCtorInitializersRef(F, Record, Idx);
 }
 
+
 void ASTDeclReader::VisitObjCPropertyImplDecl(ObjCPropertyImplDecl *D) {
   VisitDecl(D);
   D->setAtLoc(ReadSourceLocation(Record, Idx));
@@ -1297,6 +1300,7 @@ void ASTDeclReader::VisitLabelDecl(LabelDecl *D) {
   D->setLocStart(ReadSourceLocation(Record, Idx));
 }
 
+
 void ASTDeclReader::VisitNamespaceDecl(NamespaceDecl *D) {
   RedeclarableResult Redecl = VisitRedeclarable(D);
   VisitNamedDecl(D);
@@ -1489,8 +1493,6 @@ void ASTDeclReader::MergeDefinitionData(
     Reader.PendingDefinitions.erase(MergeDD.Definition);
     MergeDD.Definition->IsCompleteDefinition = false;
     mergeDefinitionVisibility(DD.Definition, MergeDD.Definition);
-    assert(Reader.Lookups.find(MergeDD.Definition) == Reader.Lookups.end() &&
-           "already loaded pending lookups for merged definition");
   }
 
   auto PFDI = Reader.PendingFakeDefinitionData.find(&DD);
@@ -1857,10 +1859,6 @@ void ASTDeclReader::VisitClassTemplateDecl(ClassTemplateDecl *D) {
   }
 }
 
-void ASTDeclReader::VisitBuiltinTemplateDecl(BuiltinTemplateDecl *D) {
-  llvm_unreachable("BuiltinTemplates are not serialized");
-}
-
 /// TODO: Unify with ClassTemplateDecl version?
 ///       May require unifying ClassTemplateDecl and
 ///        VarTemplateDecl beyond TemplateDecl...
@@ -2138,6 +2136,16 @@ void ASTDeclReader::VisitStaticAssertDecl(StaticAssertDecl *D) {
   D->Message = cast<StringLiteral>(Reader.ReadExpr(F));
   D->RParenLoc = ReadSourceLocation(Record, Idx);
 }
+
+//@@
+void ASTDeclReader::VisitExecuteDecl(ExecuteDecl *D) {
+  VisitDecl(D);
+}
+
+void ASTDeclReader::VisitDefDecl(DefDecl *D) {
+  VisitDecl(D);
+}
+//@@
 
 void ASTDeclReader::VisitEmptyDecl(EmptyDecl *D) {
   VisitDecl(D);
@@ -2746,12 +2754,12 @@ static NamedDecl *getDeclForMerging(NamedDecl *Found,
   // declaration, then we want that inner declaration. Declarations from
   // AST files are handled via ImportedTypedefNamesForLinkage.
   if (Found->isFromASTFile())
-    return nullptr;
+    return 0;
 
   if (auto *TND = dyn_cast<TypedefNameDecl>(Found))
     return TND->getAnonDeclWithTypedefName();
 
-  return nullptr;
+  return 0;
 }
 
 NamedDecl *ASTDeclReader::getAnonymousDeclForMerging(ASTReader &Reader,
@@ -2921,7 +2929,6 @@ void ASTDeclReader::attachPreviousDeclImpl(ASTReader &Reader,
   D->RedeclLink.setPrevious(cast<DeclT>(Previous));
   D->First = cast<DeclT>(Previous)->First;
 }
-
 namespace clang {
 template<>
 void ASTDeclReader::attachPreviousDeclImpl(ASTReader &Reader,
@@ -2967,8 +2974,7 @@ void ASTDeclReader::attachPreviousDeclImpl(ASTReader &Reader,
           std::make_pair(Canon, IsUnresolved ? PrevFD : FD));
   }
 }
-} // end namespace clang
-
+}
 void ASTDeclReader::attachPreviousDeclImpl(ASTReader &Reader, ...) {
   llvm_unreachable("attachPreviousDecl on non-redeclarable declaration");
 }
@@ -3299,6 +3305,17 @@ Decl *ASTReader::ReadDeclRecord(DeclID ID) {
   case DECL_OMP_THREADPRIVATE:
     D = OMPThreadPrivateDecl::CreateDeserialized(Context, ID, Record[Idx++]);
     break;
+//@@
+  case DECL_INLINE:
+    D = InlineDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_EXECUTE:
+    D = ExecuteDecl::CreateDeserialized(Context, ID);
+    break;
+  case DECL_DEF:
+    D = DefDecl::CreateDeserialized(Context, ID);
+    break;
+//@@
   case DECL_EMPTY:
     D = EmptyDecl::CreateDeserialized(Context, ID);
     break;
@@ -3354,10 +3371,15 @@ void ASTReader::loadDeclUpdateRecords(serialization::DeclID ID, Decl *D) {
     PendingVisibleUpdates.erase(I);
 
     auto *DC = cast<DeclContext>(D)->getPrimaryContext();
-    for (const PendingVisibleUpdate &Update : VisibleUpdates)
-      Lookups[DC].Table.add(
-          Update.Mod, Update.Data,
+    for (const PendingVisibleUpdate &Update : VisibleUpdates) {
+      auto *&LookupTable = Update.Mod->DeclContextInfos[DC].NameLookupTableData;
+      assert(!LookupTable && "multiple lookup tables for DC in module");
+      LookupTable = reader::ASTDeclContextNameLookupTable::Create(
+          Update.Data + Update.BucketOffset,
+          Update.Data + sizeof(uint32_t),
+          Update.Data,
           reader::ASTDeclContextNameLookupTrait(*this, *Update.Mod));
+    }
     DC->setHasExternalVisibleStorage(true);
   }
 
@@ -3546,7 +3568,7 @@ namespace {
       return true;
     }
   };
-} // end anonymous namespace
+}
 
 void ASTReader::loadObjCCategories(serialization::GlobalDeclID ID,
                                    ObjCInterfaceDecl *D,

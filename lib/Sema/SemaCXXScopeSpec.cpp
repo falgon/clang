@@ -465,7 +465,7 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S,
                                        bool ErrorRecoveryLookup,
                                        bool *IsCorrectedToColon) {
   LookupResult Found(*this, &Identifier, IdentifierLoc, 
-                     LookupNestedNameSpecifierName);
+	                     LookupNestedNameSpecifierName);
 
   // Determine where to perform name lookup
   DeclContext *LookupCtx = nullptr;
@@ -533,9 +533,6 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S,
     LookupName(Found, S);
   }
 
-  if (Found.isAmbiguous())
-    return true;
-
   // If we performed lookup into a dependent context and did not find anything,
   // that's fine: just build a dependent nested-name-specifier.
   if (Found.empty() && isDependent &&
@@ -554,6 +551,8 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S,
     return false;
   }
 
+  // FIXME: Deal with ambiguities cleanly.
+
   if (Found.empty() && !ErrorRecoveryLookup) {
     // If identifier is not found as class-name-or-namespace-name, but is found
     // as other entity, don't look for typos.
@@ -563,8 +562,6 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S,
     else if (S && !isDependent)
       LookupName(R, S);
     if (!R.empty()) {
-      // Don't diagnose problems with this speculative lookup.
-      R.suppressDiagnostics();
       // The identifier is found in ordinary lookup. If correction to colon is
       // allowed, suggest replacement to ':'.
       if (IsCorrectedToColon) {
@@ -586,6 +583,12 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S,
   }
 
   if (Found.empty() && !ErrorRecoveryLookup && !getLangOpts().MSVCCompat) {
+//@@
+    if (CurContext->allowUnresolvedIds()) {
+      SS.Extend(Context, &Identifier, IdentifierLoc, CCLoc);
+      return false;
+    }
+//@@
     // We haven't found anything, and we're not recovering from a
     // different kind of error, so look for typos.
     DeclarationName Name = Found.getLookupName();
@@ -773,6 +776,13 @@ bool Sema::BuildCXXNestedNameSpecifier(Scope *S,
     }
   }
 
+//@@
+    if (Found.empty() && CurContext->allowUnresolvedIds()) {
+      SS.Extend(Context, &Identifier, IdentifierLoc, CCLoc);
+      return false;
+    }
+//@@
+
   if (!Found.empty()) {
     if (TypeDecl *TD = Found.getAsSingle<TypeDecl>())
       Diag(IdentifierLoc, diag::err_expected_class_or_namespace)
@@ -877,6 +887,15 @@ bool Sema::ActOnCXXNestedNameSpecifier(Scope *S,
     // Handle a dependent template specialization for which we cannot resolve
     // the template name.
     assert(DTN->getQualifier() == SS.getScopeRep());
+//@@
+    if (DTN->getQualifier() && DTN->getQualifier()->getKind() == NestedNameSpecifier::Global) {
+      QualType T = Context.getDependentTemplateSpecializationType(ETK_None, 
+        nullptr, DTN->getIdentifier(), TemplateArgs);
+      NestedNameSpecifier *NNS = NestedNameSpecifier::Create(Context, DTN->getQualifier(), true, T.getTypePtr());
+      SS.MakeTrivial(Context, NNS, SourceRange(SS.getBeginLoc(), CCLoc));
+	  return false;
+    }
+//@@
     QualType T = Context.getDependentTemplateSpecializationType(ETK_None,
                                                           DTN->getQualifier(),
                                                           DTN->getIdentifier(),

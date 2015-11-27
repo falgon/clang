@@ -82,6 +82,13 @@ class IdentifierInfo {
 public:
   IdentifierInfo();
 
+//@@
+  bool isMetaGenerated() const {
+    StringRef name = getName();
+    return name.startswith(tok::getPunctuatorSpelling(tok::periodtilde)) ||
+           name.startswith(tok::getPunctuatorSpelling(tok::periodexclaim));
+  }
+//@@
 
   /// \brief Return true if this is the identifier for the specified string.
   ///
@@ -481,6 +488,17 @@ public:
 
     return *II;
   }
+
+//@@
+  /// \brief Return a new identifier token info for the specified named 
+  /// identifier.
+  IdentifierInfo *makeNew(StringRef Name) {
+    void *Mem = getAllocator().Allocate<IdentifierInfo>();
+    IdentifierInfo *II = new (Mem) IdentifierInfo();
+	II->Entry = HashTableTy::value_type::Create(Name);
+	return II;
+  }
+//@@
 
   IdentifierInfo &get(StringRef Name, tok::TokenKind TokenCode) {
     IdentifierInfo &II = get(Name);

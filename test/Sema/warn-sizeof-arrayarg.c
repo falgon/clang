@@ -4,7 +4,11 @@ typedef int Arr[10];
 
 typedef int trungl_int;
 
-void f(int a[10], Arr arr) { // expected-note 4 {{declared here}}
+void f(int a[10], Arr arr) {  // \
+// expected-note {{declared here}} \
+// expected-note {{declared here}} \
+// expected-note {{declared here}} \
+// expected-note {{declared here}}
 
   /* Should warn. */
   (void)sizeof(a);  // \

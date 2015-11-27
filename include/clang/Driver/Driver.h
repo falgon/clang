@@ -36,11 +36,6 @@ namespace opt {
 }
 
 namespace clang {
-
-namespace vfs {
-class FileSystem;
-}
-
 namespace driver {
 
   class Action;
@@ -52,22 +47,12 @@ namespace driver {
   class SanitizerArgs;
   class ToolChain;
 
-/// Describes the kind of LTO mode selected via -f(no-)?lto(=.*)? options.
-enum LTOKind {
-  LTOK_None,
-  LTOK_Full,
-  LTOK_Thin,
-  LTOK_Unknown
-};
-
 /// Driver - Encapsulate logic for constructing compilation processes
 /// from a set of gcc-driver-like command line arguments.
 class Driver {
   llvm::opt::OptTable *Opts;
 
   DiagnosticsEngine &Diags;
-
-  IntrusiveRefCntPtr<vfs::FileSystem> VFS;
 
   enum DriverMode {
     GCCMode,
@@ -81,9 +66,6 @@ class Driver {
     SaveTempsCwd,
     SaveTempsObj
   } SaveTemps;
-
-  /// LTO mode selected via -f(no-)?lto(=.*)? options.
-  LTOKind LTOMode;
 
 public:
   // Diag - Forwarding function for diagnostics.
@@ -219,9 +201,9 @@ private:
                                  SmallVectorImpl<std::string> &Names) const;
 
 public:
-  Driver(StringRef ClangExecutable, StringRef DefaultTargetTriple,
-         DiagnosticsEngine &Diags,
-         IntrusiveRefCntPtr<vfs::FileSystem> VFS = nullptr);
+  Driver(StringRef _ClangExecutable,
+         StringRef _DefaultTargetTriple,
+         DiagnosticsEngine &_Diags);
   ~Driver();
 
   /// @name Accessors
@@ -233,8 +215,6 @@ public:
   const llvm::opt::OptTable &getOpts() const { return *Opts; }
 
   const DiagnosticsEngine &getDiags() const { return Diags; }
-
-  vfs::FileSystem &getVFS() const { return *VFS; }
 
   bool getCheckInputsExist() const { return CheckInputsExist; }
 
@@ -297,21 +277,22 @@ public:
   /// BuildActions - Construct the list of actions to perform for the
   /// given arguments, which are only done for a single architecture.
   ///
-  /// \param C - The compilation that is being built.
   /// \param TC - The default host tool chain.
   /// \param Args - The input arguments.
   /// \param Actions - The list to store the resulting actions onto.
-  void BuildActions(Compilation &C, const ToolChain &TC,
-                    llvm::opt::DerivedArgList &Args, const InputList &Inputs,
-                    ActionList &Actions) const;
+  void BuildActions(const ToolChain &TC, llvm::opt::DerivedArgList &Args,
+                    const InputList &Inputs, ActionList &Actions) const;
 
   /// BuildUniversalActions - Construct the list of actions to perform
   /// for the given arguments, which may require a universal build.
   ///
-  /// \param C - The compilation that is being built.
   /// \param TC - The default host tool chain.
-  void BuildUniversalActions(Compilation &C, const ToolChain &TC,
-                             const InputList &BAInputs) const;
+  /// \param Args - The input arguments.
+  /// \param Actions - The list to store the resulting actions onto.
+  void BuildUniversalActions(const ToolChain &TC,
+                             llvm::opt::DerivedArgList &Args,
+                             const InputList &BAInputs,
+                             ActionList &Actions) const;
 
   /// BuildJobs - Bind actions to concrete tools and translate
   /// arguments to form the list of jobs to run.
@@ -421,17 +402,9 @@ public:
   /// handle this action.
   bool ShouldUseClangCompiler(const JobAction &JA) const;
 
-  /// Returns true if we are performing any kind of LTO.
-  bool isUsingLTO() const { return LTOMode != LTOK_None; }
-
-  /// Get the specific kind of LTO being performed.
-  LTOKind getLTOMode() const { return LTOMode; }
+  bool IsUsingLTO(const llvm::opt::ArgList &Args) const;
 
 private:
-  /// Parse the \p Args list for LTO options and record the type of LTO
-  /// compilation based on which -f(no-)?lto(=.*)? option occurs last.
-  void setLTOMode(const llvm::opt::ArgList &Args);
-
   /// \brief Retrieves a ToolChain for a particular \p Target triple.
   ///
   /// Will cache ToolChains for the life of the driver object, and create them

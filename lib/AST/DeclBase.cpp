@@ -639,7 +639,6 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case ExternCContext:
 
     case UsingDirective:
-    case BuiltinTemplate:
     case ClassTemplateSpecialization:
     case ClassTemplatePartialSpecialization:
     case ClassScopeFunctionSpecialization:
@@ -650,6 +649,14 @@ unsigned Decl::getIdentifierNamespaceForKind(Kind DeclKind) {
     case ObjCCategoryImpl:
     case Import:
     case OMPThreadPrivate:
+//@@
+	case Escape:
+	case Inline:
+    case Execute:
+    case Def:
+	case PreprocessorDirective:
+    case QuasiQuotes:
+//@@
     case Empty:
       // Never looked up by name.
       return 0;
@@ -855,6 +862,12 @@ DeclContext *DeclContext::getLookupParent() {
   return getParent();
 }
 
+//@@
+bool DeclContext::allowUnresolvedIds() const {
+  return AllowUnresolvedIds || getParent() && getParent()->allowUnresolvedIds();
+}
+//@@
+
 bool DeclContext::isInlineNamespace() const {
   return isNamespace() &&
          cast<NamespaceDecl>(this)->isInline();
@@ -877,6 +890,11 @@ bool DeclContext::isStdNamespace() const {
 }
 
 bool DeclContext::isDependentContext() const {
+//@@
+  if (AllowUnresolvedIds)
+    return true;
+//@@
+
   if (isFileContext())
     return false;
 
@@ -952,6 +970,12 @@ DeclContext *DeclContext::getPrimaryContext() {
   case Decl::LinkageSpec:
   case Decl::Block:
   case Decl::Captured:
+//@@
+  case Decl::Inline:
+  case Decl::Execute:
+  case Decl::Def:
+  case Decl::QuasiQuotes:
+//@@
     // There is only one DeclContext for these entities.
     return this;
 
@@ -1210,16 +1234,13 @@ void DeclContext::removeDecl(Decl *D) {
     // Remove only decls that have a name
     if (!ND->getDeclName()) return;
 
-    auto *DC = this;
-    do {
-      StoredDeclsMap *Map = DC->getPrimaryContext()->LookupPtr;
-      if (Map) {
-        StoredDeclsMap::iterator Pos = Map->find(ND->getDeclName());
-        assert(Pos != Map->end() && "no lookup entry for decl");
-        if (Pos->second.getAsVector() || Pos->second.getAsDecl() == ND)
-          Pos->second.remove(ND);
-      }
-    } while (DC->isTransparentContext() && (DC = DC->getParent()));
+    StoredDeclsMap *Map = getPrimaryContext()->LookupPtr;
+    if (!Map) return;
+
+    StoredDeclsMap::iterator Pos = Map->find(ND->getDeclName());
+    assert(Pos != Map->end() && "no lookup entry for decl");
+    if (Pos->second.getAsVector() || Pos->second.getAsDecl() == ND)
+      Pos->second.remove(ND);
   }
 }
 
@@ -1237,7 +1258,7 @@ void DeclContext::addHiddenDecl(Decl *D) {
   }
 
   // Notify a C++ record declaration that we've added a member, so it can
-  // update its class-specific state.
+  // update it's class-specific state.
   if (CXXRecordDecl *Record = dyn_cast<CXXRecordDecl>(this))
     Record->addedMember(D);
 

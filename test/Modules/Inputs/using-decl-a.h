@@ -1,6 +1,5 @@
 typedef int using_decl_type;
 int using_decl_var;
-int merged;
 
 namespace UsingDecl {
   using ::using_decl_type;

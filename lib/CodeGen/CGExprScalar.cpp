@@ -151,9 +151,6 @@ public:
   Value *EmitScalarConversion(Value *Src, QualType SrcTy, QualType DstTy,
                               SourceLocation Loc);
 
-  Value *EmitScalarConversion(Value *Src, QualType SrcTy, QualType DstTy,
-                              SourceLocation Loc, bool TreatBooleanAsSigned);
-
   /// Emit a conversion from the specified complex type to the specified
   /// destination type, where the destination type is an LLVM scalar type.
   Value *EmitComplexToScalarConversion(CodeGenFunction::ComplexPairTy Src,
@@ -314,7 +311,12 @@ public:
     return EmitNullValue(E->getType());
   }
   Value *VisitExplicitCastExpr(ExplicitCastExpr *E) {
-    CGF.CGM.EmitExplicitCastExprType(E, &CGF);
+    if (E->getType()->isVariablyModifiedType())
+      CGF.EmitVariablyModifiedType(E->getType());
+
+    if (CGDebugInfo *DI = CGF.getDebugInfo())
+      DI->EmitExplicitCastType(E->getType());
+
     return VisitCastExpr(E);
   }
   Value *VisitCastExpr(CastExpr *E);
@@ -361,7 +363,7 @@ public:
     if (isa<MemberPointerType>(E->getType())) // never sugared
       return CGF.CGM.getMemberPointerConstant(E);
 
-    return EmitLValue(E->getSubExpr()).getPointer();
+    return EmitLValue(E->getSubExpr()).getAddress();
   }
   Value *VisitUnaryDeref(const UnaryOperator *E) {
     if (E->getType()->isVoidType())
@@ -731,13 +733,6 @@ void ScalarExprEmitter::EmitFloatConversionCheck(
 Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
                                                QualType DstType,
                                                SourceLocation Loc) {
-  return EmitScalarConversion(Src, SrcType, DstType, Loc, false);
-}
-
-Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
-                                               QualType DstType,
-                                               SourceLocation Loc,
-                                               bool TreatBooleanAsSigned) {
   SrcType = CGF.getContext().getCanonicalType(SrcType);
   DstType = CGF.getContext().getCanonicalType(DstType);
   if (SrcType == DstType) return Src;
@@ -812,8 +807,7 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
   if (DstType->isExtVectorType() && !SrcType->isVectorType()) {
     // Cast the scalar to element type
     QualType EltTy = DstType->getAs<ExtVectorType>()->getElementType();
-    llvm::Value *Elt = EmitScalarConversion(
-        Src, SrcType, EltTy, Loc, CGF.getContext().getLangOpts().OpenCL);
+    llvm::Value *Elt = EmitScalarConversion(Src, SrcType, EltTy, Loc);
 
     // Splat the element across to all elements
     unsigned NumElements = cast<llvm::VectorType>(DstTy)->getNumElements();
@@ -853,9 +847,6 @@ Value *ScalarExprEmitter::EmitScalarConversion(Value *Src, QualType SrcType,
 
   if (isa<llvm::IntegerType>(SrcTy)) {
     bool InputSigned = SrcType->isSignedIntegerOrEnumerationType();
-    if (SrcType->isBooleanType() && TreatBooleanAsSigned) {
-      InputSigned = true;
-    }
     if (isa<llvm::IntegerType>(DstTy))
       Res = Builder.CreateIntCast(Src, DstTy, InputSigned, "conv");
     else if (InputSigned)
@@ -1336,13 +1327,13 @@ Value *ScalarExprEmitter::VisitInitListExpr(InitListExpr *E) {
   return V;
 }
 
-bool CodeGenFunction::ShouldNullCheckClassCastValue(const CastExpr *CE) {
+static bool ShouldNullCheckClassCastValue(const CastExpr *CE) {
   const Expr *E = CE->getSubExpr();
 
   if (CE->getCastKind() == CK_UncheckedDerivedToBase)
     return false;
 
-  if (isa<CXXThisExpr>(E->IgnoreParens())) {
+  if (isa<CXXThisExpr>(E)) {
     // We always assume that 'this' is never null.
     return false;
   }
@@ -1377,10 +1368,11 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
 
   case CK_LValueBitCast:
   case CK_ObjCObjectLValueCast: {
-    Address Addr = EmitLValue(E).getAddress();
-    Addr = Builder.CreateElementBitCast(Addr, CGF.ConvertTypeForMem(DestTy));
-    LValue LV = CGF.MakeAddrLValue(Addr, DestTy);
-    return EmitLoadOfLValue(LV, CE->getExprLoc());
+    Value *V = EmitLValue(E).getAddress();
+    V = Builder.CreateBitCast(V,
+                          ConvertType(CGF.getContext().getPointerType(DestTy)));
+    return EmitLoadOfLValue(CGF.MakeNaturalAlignAddrLValue(V, DestTy),
+                            CE->getExprLoc());
   }
 
   case CK_CPointerToObjCPointerCast:
@@ -1420,44 +1412,68 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
     const CXXRecordDecl *DerivedClassDecl = DestTy->getPointeeCXXRecordDecl();
     assert(DerivedClassDecl && "BaseToDerived arg isn't a C++ object pointer!");
 
-    Address Base = CGF.EmitPointerWithAlignment(E);
-    Address Derived =
-      CGF.GetAddressOfDerivedClass(Base, DerivedClassDecl,
+    llvm::Value *V = Visit(E);
+
+    llvm::Value *Derived =
+      CGF.GetAddressOfDerivedClass(V, DerivedClassDecl,
                                    CE->path_begin(), CE->path_end(),
-                                   CGF.ShouldNullCheckClassCastValue(CE));
+                                   ShouldNullCheckClassCastValue(CE));
 
     // C++11 [expr.static.cast]p11: Behavior is undefined if a downcast is
     // performed and the object is not of the derived type.
     if (CGF.sanitizePerformTypeCheck())
       CGF.EmitTypeCheck(CodeGenFunction::TCK_DowncastPointer, CE->getExprLoc(),
-                        Derived.getPointer(), DestTy->getPointeeType());
+                        Derived, DestTy->getPointeeType());
 
     if (CGF.SanOpts.has(SanitizerKind::CFIDerivedCast))
-      CGF.EmitVTablePtrCheckForCast(DestTy->getPointeeType(),
-                                    Derived.getPointer(),
+      CGF.EmitVTablePtrCheckForCast(DestTy->getPointeeType(), Derived,
                                     /*MayBeNull=*/true,
                                     CodeGenFunction::CFITCK_DerivedCast,
                                     CE->getLocStart());
 
-    return Derived.getPointer();
+    return Derived;
   }
   case CK_UncheckedDerivedToBase:
   case CK_DerivedToBase: {
-    // The EmitPointerWithAlignment path does this fine; just discard
-    // the alignment.
-    return CGF.EmitPointerWithAlignment(CE).getPointer();
-  }
+    const CXXRecordDecl *DerivedClassDecl =
+      E->getType()->getPointeeCXXRecordDecl();
+    assert(DerivedClassDecl && "DerivedToBase arg isn't a C++ object pointer!");
 
+    return CGF.GetAddressOfBaseClass(
+        Visit(E), DerivedClassDecl, CE->path_begin(), CE->path_end(),
+        ShouldNullCheckClassCastValue(CE), CE->getExprLoc());
+  }
   case CK_Dynamic: {
-    Address V = CGF.EmitPointerWithAlignment(E);
+    Value *V = Visit(const_cast<Expr*>(E));
     const CXXDynamicCastExpr *DCE = cast<CXXDynamicCastExpr>(CE);
     return CGF.EmitDynamicCast(V, DCE);
   }
 
-  case CK_ArrayToPointerDecay:
-    return CGF.EmitArrayToPointerDecay(E).getPointer();
+  case CK_ArrayToPointerDecay: {
+    assert(E->getType()->isArrayType() &&
+           "Array to pointer decay must have array source type!");
+
+    Value *V = EmitLValue(E).getAddress();  // Bitfields can't be arrays.
+
+    // Note that VLA pointers are always decayed, so we don't need to do
+    // anything here.
+    if (!E->getType()->isVariableArrayType()) {
+      assert(isa<llvm::PointerType>(V->getType()) && "Expected pointer");
+      llvm::Type *NewTy = ConvertType(E->getType());
+      V = CGF.Builder.CreatePointerCast(
+          V, NewTy->getPointerTo(V->getType()->getPointerAddressSpace()));
+
+      assert(isa<llvm::ArrayType>(V->getType()->getPointerElementType()) &&
+             "Expected pointer to array");
+      V = Builder.CreateStructGEP(NewTy, V, 0, "arraydecay");
+    }
+
+    // Make sure the array decay ends up being the right type.  This matters if
+    // the array type was of an incomplete type.
+    return CGF.Builder.CreatePointerCast(V, ConvertType(CE->getType()));
+  }
   case CK_FunctionToPointerDecay:
-    return EmitLValue(E).getPointer();
+    return EmitLValue(E).getAddress();
 
   case CK_NullToPointer:
     if (MustVisitNullValue(E))
@@ -1540,14 +1556,10 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
   }
   case CK_VectorSplat: {
     llvm::Type *DstTy = ConvertType(DestTy);
-    // Need an IgnoreImpCasts here as by default a boolean will be promoted to
-    // an int, which will not perform the sign extension, so if we know we are
-    // going to cast to a vector we have to strip the implicit cast off.
-    Value *Elt = Visit(const_cast<Expr*>(E->IgnoreImpCasts()));
-    Elt = EmitScalarConversion(Elt, E->IgnoreImpCasts()->getType(),
+    Value *Elt = Visit(const_cast<Expr*>(E));
+    Elt = EmitScalarConversion(Elt, E->getType(),
                                DestTy->getAs<VectorType>()->getElementType(),
-                               CE->getExprLoc(), 
-                               CGF.getContext().getLangOpts().OpenCL);
+                               CE->getExprLoc());
 
     // Splat the element across to all elements
     unsigned NumElements = cast<llvm::VectorType>(DstTy)->getNumElements();
@@ -1597,9 +1609,9 @@ Value *ScalarExprEmitter::VisitCastExpr(CastExpr *CE) {
 
 Value *ScalarExprEmitter::VisitStmtExpr(const StmtExpr *E) {
   CodeGenFunction::StmtExprEvaluation eval(CGF);
-  Address RetAlloca = CGF.EmitCompoundStmt(*E->getSubStmt(),
-                                           !E->getType()->isVoidType());
-  if (!RetAlloca.isValid())
+  llvm::Value *RetAlloca = CGF.EmitCompoundStmt(*E->getSubStmt(),
+                                                !E->getType()->isVoidType());
+  if (!RetAlloca)
     return nullptr;
   return CGF.EmitLoadOfScalar(CGF.MakeAddrLValue(RetAlloca, E->getType()),
                               E->getExprLoc());
@@ -1655,14 +1667,16 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
     if (isInc && type->isBooleanType()) {
       llvm::Value *True = CGF.EmitToMemory(Builder.getTrue(), type);
       if (isPre) {
-        Builder.CreateStore(True, LV.getAddress(), LV.isVolatileQualified())
-          ->setAtomic(llvm::SequentiallyConsistent);
+        Builder.Insert(new llvm::StoreInst(True,
+              LV.getAddress(), LV.isVolatileQualified(),
+              LV.getAlignment().getQuantity(),
+              llvm::SequentiallyConsistent));
         return Builder.getTrue();
       }
       // For atomic bool increment, we just store true and return it for
       // preincrement, do an atomic swap with true for postincrement
         return Builder.CreateAtomicRMW(llvm::AtomicRMWInst::Xchg,
-            LV.getPointer(), True, llvm::SequentiallyConsistent);
+            LV.getAddress(), True, llvm::SequentiallyConsistent);
     }
     // Special case for atomic increment / decrement on integers, emit
     // atomicrmw instructions.  We skip this if we want to be doing overflow
@@ -1679,7 +1693,7 @@ ScalarExprEmitter::EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
       llvm::Value *amt = CGF.EmitToMemory(
           llvm::ConstantInt::get(ConvertType(type), 1, true), type);
       llvm::Value *old = Builder.CreateAtomicRMW(aop,
-          LV.getPointer(), amt, llvm::SequentiallyConsistent);
+          LV.getAddress(), amt, llvm::SequentiallyConsistent);
       return isPre ? Builder.CreateBinOp(op, old, amt) : old;
     }
     value = EmitLoadOfLValue(LV, E->getExprLoc());
@@ -2116,7 +2130,7 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
   OpInfo.RHS = Visit(E->getRHS());
   OpInfo.Ty = E->getComputationResultType();
   OpInfo.Opcode = E->getOpcode();
-  OpInfo.FPContractable = E->isFPContractable();
+  OpInfo.FPContractable = false;
   OpInfo.E = E;
   // Load/convert the LHS.
   LValue LHSLV = EmitCheckedLValue(E->getLHS(), CodeGenFunction::TCK_Store);
@@ -2160,7 +2174,7 @@ LValue ScalarExprEmitter::EmitCompoundAssignLValue(
             EmitScalarConversion(OpInfo.RHS, E->getRHS()->getType(), LHSTy,
                                  E->getExprLoc()),
             LHSTy);
-        Builder.CreateAtomicRMW(aop, LHSLV.getPointer(), amt,
+        Builder.CreateAtomicRMW(aop, LHSLV.getAddress(), amt,
             llvm::SequentiallyConsistent);
         return LHSLV;
       }
@@ -2375,9 +2389,9 @@ Value *ScalarExprEmitter::EmitOverflowCheckedBinOp(const BinOpInfo &Ops) {
 
   // Branch in case of overflow.
   llvm::BasicBlock *initialBB = Builder.GetInsertBlock();
-  llvm::Function::iterator insertPt = initialBB->getIterator();
+  llvm::Function::iterator insertPt = initialBB;
   llvm::BasicBlock *continueBB = CGF.createBasicBlock("nooverflow", CGF.CurFn,
-                                                      &*std::next(insertPt));
+                                                      std::next(insertPt));
   llvm::BasicBlock *overflowBB = CGF.createBasicBlock("overflow", CGF.CurFn);
 
   Builder.CreateCondBr(overflow, overflowBB, continueBB);
@@ -3370,14 +3384,13 @@ Value *ScalarExprEmitter::VisitVAArgExpr(VAArgExpr *VE) {
   if (Ty->isVariablyModifiedType())
     CGF.EmitVariablyModifiedType(Ty);
 
-  Address ArgValue = Address::invalid();
-  Address ArgPtr = CGF.EmitVAArg(VE, ArgValue);
-
+  llvm::Value *ArgValue = CGF.EmitVAListRef(VE->getSubExpr());
+  llvm::Value *ArgPtr = CGF.EmitVAArg(ArgValue, VE->getType());
   llvm::Type *ArgTy = ConvertType(VE->getType());
 
   // If EmitVAArg fails, we fall back to the LLVM instruction.
-  if (!ArgPtr.isValid())
-    return Builder.CreateVAArg(ArgValue.getPointer(), ArgTy);
+  if (!ArgPtr)
+    return Builder.CreateVAArg(ArgValue, ArgTy);
 
   // FIXME Volatility.
   llvm::Value *Val = Builder.CreateLoad(ArgPtr);
@@ -3494,20 +3507,30 @@ EmitScalarPrePostIncDec(const UnaryOperator *E, LValue LV,
 }
 
 LValue CodeGenFunction::EmitObjCIsaExpr(const ObjCIsaExpr *E) {
+  llvm::Value *V;
   // object->isa or (*object).isa
   // Generate code as for: *(Class*)object
+  // build Class* type
+  llvm::Type *ClassPtrTy = ConvertType(E->getType());
 
   Expr *BaseExpr = E->getBase();
-  Address Addr = Address::invalid();
   if (BaseExpr->isRValue()) {
-    Addr = Address(EmitScalarExpr(BaseExpr), getPointerAlign());
+    V = CreateMemTemp(E->getType(), "resval");
+    llvm::Value *Src = EmitScalarExpr(BaseExpr);
+    Builder.CreateStore(Src, V);
+    V = ScalarExprEmitter(*this).EmitLoadOfLValue(
+      MakeNaturalAlignAddrLValue(V, E->getType()), E->getExprLoc());
   } else {
-    Addr = EmitLValue(BaseExpr).getAddress();
+    if (E->isArrow())
+      V = ScalarExprEmitter(*this).EmitLoadOfLValue(BaseExpr);
+    else
+      V = EmitLValue(BaseExpr).getAddress();
   }
 
-  // Cast the address to Class*.
-  Addr = Builder.CreateElementBitCast(Addr, ConvertType(E->getType()));
-  return MakeAddrLValue(Addr, E->getType());
+  // build Class* type
+  ClassPtrTy = ClassPtrTy->getPointerTo();
+  V = Builder.CreateBitCast(V, ClassPtrTy);
+  return MakeNaturalAlignAddrLValue(V, E->getType());
 }
 
 

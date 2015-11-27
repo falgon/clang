@@ -25,6 +25,9 @@
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/LangOptions.h"
 #include "clang/Basic/TypeTraits.h"
+//@@
+#include "clang/Sema/DeclSpec.h"
+//@@
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallVector.h"
@@ -61,6 +64,7 @@ struct SubobjectAdjustment {
     FieldAdjustment,
     MemberPointerAdjustment
   } Kind;
+
 
   struct DTB {
     const CastExpr *BasePath;
@@ -148,6 +152,8 @@ public:
   /// \brief Set whether this expression is value-dependent or not.
   void setValueDependent(bool VD) {
     ExprBits.ValueDependent = VD;
+    if (VD)
+      ExprBits.InstantiationDependent = true;
   }
 
   /// isTypeDependent - Determines whether this expression is
@@ -166,6 +172,8 @@ public:
   /// \brief Set whether this expression is type-dependent or not.
   void setTypeDependent(bool TD) {
     ExprBits.TypeDependent = TD;
+    if (TD)
+      ExprBits.InstantiationDependent = true;
   }
 
   /// \brief Whether this expression is instantiation-dependent, meaning that
@@ -805,6 +813,7 @@ public:
            T->getStmtClass() <= lastExprConstant;
   }
 };
+
 
 //===----------------------------------------------------------------------===//
 // Primary Expressions.
@@ -1673,6 +1682,141 @@ public:
   child_range children() { return child_range(&Val, &Val+1); }
 };
 
+
+//@@
+class QuotedElements {
+public:
+	enum ASTType {
+		AST_Expression,
+		AST_StatementOrDeclarationList,
+		AST_ParameterDeclaration,
+		AST_DeclContext,
+		AST_TypeInfo,
+		AST_Invalid	
+	};
+	typedef std::vector<Stmt*> StmtVector;
+	typedef std::vector<DeclaratorChunk::ParamInfo> ParamVector;
+
+  typedef StmtIterator       child_iterator;
+  typedef llvm::iterator_range<child_iterator> child_range;
+
+private:
+	ASTType type;
+	union {
+		Expr			*expr;
+		Stmt			**stmts;
+		ParamVector		*params;
+		DeclContext		*dc;
+		TypeSourceInfo	*type;
+	} value;
+	unsigned size;
+
+	void clear();
+public:
+	QuotedElements(void) : type(AST_Invalid), size(0) {}
+	~QuotedElements() { clear(); }
+
+	ASTType getType(void) const { return type; }
+
+	void	setExpr(Expr* e) { clear(); type = AST_Expression; size = 1; value.expr = e; }
+	Expr*	getExpr(void) { assert(isExpr()); return value.expr; }
+	const Expr* getExpr(void) const { assert(isExpr()); return value.expr; }
+	bool	isExpr(void) const { return type == AST_Expression; }
+
+	void setStmts(const StmtVector& stmts);
+	Stmt** getStmts(unsigned *size = nullptr) {
+		assert(isStmtList());
+		if (size)
+			*size = this->size;
+		return value.stmts;
+	}
+	Stmt** const getStmts(unsigned *size = nullptr) const {
+		assert(isStmtList());
+		if (size)
+			*size = this->size;
+		return value.stmts;
+	}
+	bool isStmtList(void) const { return type == AST_StatementOrDeclarationList; }
+
+	void setParams(ParamVector* params) { clear(); type = AST_ParameterDeclaration; size = 1; value.params = params; }
+	ParamVector* getParams(void) { assert(isParamDeclaration()); return value.params; }
+	const ParamVector* getParams(void) const { assert(isParamDeclaration()); return value.params; }
+	bool isParamDeclaration(void) const { return type == AST_ParameterDeclaration; }
+
+	void setDeclContext(DeclContext* DC) { clear(); type = AST_DeclContext; size = 1; value.dc = DC; }
+	DeclContext* getDeclContext(unsigned *size = nullptr) {
+		assert(isDeclContext());
+		if (size)
+			*size = this->size;
+		return value.dc;
+	}
+	const DeclContext* getDeclContext(unsigned *size = nullptr) const {
+		assert(isDeclContext());
+		if (size)
+			*size = this->size;
+		return value.dc;
+	}
+	bool isDeclContext(void) const { return type == AST_DeclContext; }
+
+	void setTypeInfo(TypeSourceInfo* TInfo) { clear(); type = AST_TypeInfo; size = 1; value.type = TInfo; }
+	TypeSourceInfo* getTypeInfo(void) { assert(isTypeInfo()); return value.type; }
+	const TypeSourceInfo* getTypeInfo(void) const { assert(isTypeInfo()); return value.type; }
+	bool isTypeInfo(void) const { return type == AST_TypeInfo; }
+
+	void printPretty(raw_ostream &OS, PrinterHelper *Helper,
+					   const PrintingPolicy &Policy,
+					   unsigned Indentation = 0) const;
+
+	//Iterators
+	child_range children();
+};
+
+/// QuasiQuoteExpr - This represents a quasi-quote expression, e.g. ".<1>.)".
+//TODO: Besides expr, quasi-quotes should also support stmts, decls, etc.
+class QuasiQuoteExpr : public Expr {
+  SourceLocation L, R;
+  QuotedElements *Elems;
+public:
+	QuasiQuoteExpr(QuotedElements *Elems, QualType type, SourceLocation l, SourceLocation r)
+    : Expr(QuasiQuoteExprClass, type,
+           VK_RValue, OK_Ordinary, false, false, false, false),
+		   //@@TODO: these values are aggregated from escapes within thhe quasiquotes
+           //val->isTypeDependent(), val->isValueDependent(),
+           //val->isInstantiationDependent(),
+           //val->containsUnexpandedParameterPack()),
+      L(l), R(r), Elems(Elems) {}
+
+  /// \brief Construct an empty quasi-quote expression.
+  explicit QuasiQuoteExpr(EmptyShell Empty)
+    : Expr(ParenExprClass, Empty) { }
+
+  const QuotedElements *getElements() const { return Elems; }
+  QuotedElements *getElements() { return Elems; }
+  void setElements(QuotedElements *E) { Elems = E; }
+
+  SourceLocation getLocStart() const LLVM_READONLY { return L; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return R; }
+
+  /// \brief Get the location of the quasi-quote start '.<'.
+  SourceLocation getStartLoc() const { return L; }
+  void setStartLoc(SourceLocation Loc) { L = Loc; }
+
+  /// \brief Get the location of the quasi-quote end '>.'.
+  SourceLocation getEndLoc() const { return R; }
+  void setEndLoc(SourceLocation Loc) { R = Loc; }
+
+  static bool classof(const Stmt *T) {
+	  return T->getStmtClass() == QuasiQuoteExprClass;
+  }
+
+  std::vector<Stmt*> getEscapes() const { return std::vector<Stmt*>();/*TODO: implement this*/ }
+
+  // Iterators
+  child_range children() { return Elems->children(); }
+};
+//@@
+
+
 /// UnaryOperator - This represents the unary-expression's (except sizeof and
 /// alignof), the postinc/postdec operators from postfix-expression, and various
 /// extensions.
@@ -2155,6 +2299,7 @@ public:
     return child_range(&SubExprs[0], &SubExprs[0]+END_EXPR);
   }
 };
+
 
 /// CallExpr - Represents a function call (C99 6.5.2.2, C++ [expr.call]).
 /// CallExpr itself represents a normal function call, e.g., "f(x, 2)",
@@ -3452,6 +3597,7 @@ public:
   child_range children() { return child_range(&SubStmt, &SubStmt+1); }
 };
 
+
 /// ShuffleVectorExpr - clang-specific builtin-in function
 /// __builtin_shufflevector.
 /// This AST node represents a operator that does a constant
@@ -3690,35 +3836,33 @@ public:
   }
 };
 
-/// Represents a call to the builtin function \c __builtin_va_arg.
+/// VAArgExpr, used for the builtin function __builtin_va_arg.
 class VAArgExpr : public Expr {
   Stmt *Val;
-  llvm::PointerIntPair<TypeSourceInfo *, 1, bool> TInfo;
+  TypeSourceInfo *TInfo;
   SourceLocation BuiltinLoc, RParenLoc;
 public:
-  VAArgExpr(SourceLocation BLoc, Expr *e, TypeSourceInfo *TInfo,
-            SourceLocation RPLoc, QualType t, bool IsMS)
-      : Expr(VAArgExprClass, t, VK_RValue, OK_Ordinary, t->isDependentType(),
-             false, (TInfo->getType()->isInstantiationDependentType() ||
-                     e->isInstantiationDependent()),
-             (TInfo->getType()->containsUnexpandedParameterPack() ||
-              e->containsUnexpandedParameterPack())),
-        Val(e), TInfo(TInfo, IsMS), BuiltinLoc(BLoc), RParenLoc(RPLoc) {}
+  VAArgExpr(SourceLocation BLoc, Expr* e, TypeSourceInfo *TInfo,
+            SourceLocation RPLoc, QualType t)
+    : Expr(VAArgExprClass, t, VK_RValue, OK_Ordinary,
+           t->isDependentType(), false,
+           (TInfo->getType()->isInstantiationDependentType() ||
+            e->isInstantiationDependent()),
+           (TInfo->getType()->containsUnexpandedParameterPack() ||
+            e->containsUnexpandedParameterPack())),
+      Val(e), TInfo(TInfo),
+      BuiltinLoc(BLoc),
+      RParenLoc(RPLoc) { }
 
-  /// Create an empty __builtin_va_arg expression.
-  explicit VAArgExpr(EmptyShell Empty)
-      : Expr(VAArgExprClass, Empty), Val(nullptr), TInfo(nullptr, false) {}
+  /// \brief Create an empty __builtin_va_arg expression.
+  explicit VAArgExpr(EmptyShell Empty) : Expr(VAArgExprClass, Empty) { }
 
   const Expr *getSubExpr() const { return cast<Expr>(Val); }
   Expr *getSubExpr() { return cast<Expr>(Val); }
   void setSubExpr(Expr *E) { Val = E; }
 
-  /// Returns whether this is really a Win64 ABI va_arg expression.
-  bool isMicrosoftABI() const { return TInfo.getInt(); }
-  void setIsMicrosoftABI(bool IsMS) { TInfo.setInt(IsMS); }
-
-  TypeSourceInfo *getWrittenTypeInfo() const { return TInfo.getPointer(); }
-  void setWrittenTypeInfo(TypeSourceInfo *TI) { TInfo.setPointer(TI); }
+  TypeSourceInfo *getWrittenTypeInfo() const { return TInfo; }
+  void setWrittenTypeInfo(TypeSourceInfo *TI) { TInfo = TI; }
 
   SourceLocation getBuiltinLoc() const { return BuiltinLoc; }
   void setBuiltinLoc(SourceLocation L) { BuiltinLoc = L; }
@@ -3816,10 +3960,6 @@ public:
 
   /// \brief Retrieve the set of initializers.
   Expr **getInits() { return reinterpret_cast<Expr **>(InitExprs.data()); }
-
-  ArrayRef<Expr *> inits() {
-    return llvm::makeArrayRef(getInits(), getNumInits());
-  }
 
   const Expr *getInit(unsigned Init) const {
     assert(Init < getNumInits() && "Initializer access out of range!");
@@ -4405,6 +4545,7 @@ public:
   }
 };
 
+
 class ParenListExpr : public Expr {
   Stmt **Exprs;
   unsigned NumExprs;
@@ -4431,10 +4572,6 @@ public:
 
   Expr **getExprs() { return reinterpret_cast<Expr **>(Exprs); }
 
-  ArrayRef<Expr *> exprs() {
-    return llvm::makeArrayRef(getExprs(), getNumExprs());
-  }
-
   SourceLocation getLParenLoc() const { return LParenLoc; }
   SourceLocation getRParenLoc() const { return RParenLoc; }
 
@@ -4453,6 +4590,7 @@ public:
   friend class ASTStmtReader;
   friend class ASTStmtWriter;
 };
+
 
 /// \brief Represents a C11 generic selection.
 ///
@@ -4569,6 +4707,7 @@ public:
 // Clang Extensions
 //===----------------------------------------------------------------------===//
 
+
 /// ExtVectorElementExpr - This represents access to specific elements of a
 /// vector, and may occur on the left hand side or right hand side.  For example
 /// the following is legal:  "V.xy = V.zw" if V is a 4 element extended vector.
@@ -4631,6 +4770,7 @@ public:
   // Iterators
   child_range children() { return child_range(&Base, &Base+1); }
 };
+
 
 /// BlockExpr - Adaptor class for mixing a BlockDecl with expressions.
 /// ^{ statement-body }   or   ^(int arg1, float arg2){ statement-body }
@@ -4826,14 +4966,6 @@ public:
   const_semantics_iterator semantics_end() const {
     return getSubExprsBuffer() + getNumSubExprs();
   }
-
-  llvm::iterator_range<semantics_iterator> semantics() {
-    return llvm::make_range(semantics_begin(), semantics_end());
-  }
-  llvm::iterator_range<const_semantics_iterator> semantics() const {
-    return llvm::make_range(semantics_begin(), semantics_end());
-  }
-
   Expr *getSemanticExpr(unsigned index) {
     assert(index + 1 < getNumSubExprs());
     return getSubExprsBuffer()[index + 1];
@@ -4991,6 +5123,6 @@ public:
   }
 
 };
-} // end namespace clang
+}  // end namespace clang
 
-#endif // LLVM_CLANG_AST_EXPR_H
+#endif

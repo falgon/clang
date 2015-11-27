@@ -777,7 +777,7 @@ void TextDiagnostic::emitDiagnosticLoc(SourceLocation Loc, PresumedLoc PLoc,
   if (PLoc.isInvalid()) {
     // At least print the file name if available:
     FileID FID = SM.getFileID(Loc);
-    if (FID.isValid()) {
+    if (!FID.isInvalid()) {
       const FileEntry* FE = SM.getFileEntryForID(FID);
       if (FE && FE->isValid()) {
         OS << FE->getName();
@@ -1060,7 +1060,7 @@ void TextDiagnostic::emitSnippetAndCaret(
     SmallVectorImpl<CharSourceRange>& Ranges,
     ArrayRef<FixItHint> Hints,
     const SourceManager &SM) {
-  assert(Loc.isValid() && "must have a valid source location here");
+  assert(!Loc.isInvalid() && "must have a valid source location here");
   assert(Loc.isFileID() && "must have a file location here");
 
   // If caret diagnostics are enabled and we have location, we want to

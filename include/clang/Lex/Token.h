@@ -108,6 +108,12 @@ public:
     return tok::isAnyIdentifier(getKind());
   }
 
+//@@
+  bool isIdentifier() const {
+    return isOneOf(tok::identifier, tok::periodtilde, tok::periodexclaim);
+  }
+//@@
+
   /// \brief Return true if this is a "literal", like a numeric
   /// constant, string, etc.
   bool isLiteral() const {

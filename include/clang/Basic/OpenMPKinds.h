@@ -78,14 +78,6 @@ enum OpenMPLinearClauseKind {
   OMPC_LINEAR_unknown
 };
 
-/// \brief OpenMP mapping kind for 'map' clause.
-enum OpenMPMapClauseKind {
-#define OPENMP_MAP_KIND(Name) \
-  OMPC_MAP_##Name,
-#include "clang/Basic/OpenMPKinds.def"
-  OMPC_MAP_unknown
-};
-
 OpenMPDirectiveKind getOpenMPDirectiveKind(llvm::StringRef Str);
 const char *getOpenMPDirectiveName(OpenMPDirectiveKind Kind);
 
@@ -116,12 +108,6 @@ bool isOpenMPWorksharingDirective(OpenMPDirectiveKind DKind);
 /// \return true - the directive is a parallel-like directive like 'omp
 /// parallel', otherwise - false.
 bool isOpenMPParallelDirective(OpenMPDirectiveKind DKind);
-
-/// \brief Checks if the specified directive is a target-kind directive.
-/// \param DKind Specified directive.
-/// \return true - the directive is a target-like directive like 'omp target',
-/// otherwise - false.
-bool isOpenMPTargetDirective(OpenMPDirectiveKind DKind);
 
 /// \brief Checks if the specified directive is a teams-kind directive.
 /// \param DKind Specified directive.

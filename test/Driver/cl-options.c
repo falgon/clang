@@ -95,20 +95,17 @@
 // RUN: %clang_cl /Oi- -### -- %s 2>&1 | FileCheck -check-prefix=Oi_ %s
 // Oi_: -fno-builtin
 
-// RUN: %clang_cl /Os --target=i686-pc-windows-msvc -### -- %s 2>&1 | FileCheck -check-prefix=Os %s
-// RUN: %clang_cl /Os --target=x86_64-pc-windows-msvc -### -- %s 2>&1 | FileCheck -check-prefix=Os %s
+// RUN: %clang_cl /Os -### -- %s 2>&1 | FileCheck -check-prefix=Os %s
 // Os-NOT: -mdisable-fp-elim
 // Os: -momit-leaf-frame-pointer
 // Os: -Os
 
-// RUN: %clang_cl /Ot --target=i686-pc-windows-msvc -### -- %s 2>&1 | FileCheck -check-prefix=Ot %s
-// RUN: %clang_cl /Ot --target=x86_64-pc-windows-msvc -### -- %s 2>&1 | FileCheck -check-prefix=Ot %s
+// RUN: %clang_cl /Ot -### -- %s 2>&1 | FileCheck -check-prefix=Ot %s
 // Ot-NOT: -mdisable-fp-elim
 // Ot: -momit-leaf-frame-pointer
 // Ot: -O2
 
-// RUN: %clang_cl /Ox --target=i686-pc-windows-msvc -### -- %s 2>&1 | FileCheck -check-prefix=Ox %s
-// RUN: %clang_cl /Ox --target=x86_64-pc-windows-msvc -### -- %s 2>&1 | FileCheck -check-prefix=Ox %s
+// RUN: %clang_cl /Ox -### -- %s 2>&1 | FileCheck -check-prefix=Ox %s
 // Ox-NOT: -mdisable-fp-elim
 // Ox: -momit-leaf-frame-pointer
 // Ox: -O2
@@ -224,7 +221,6 @@
 // Ignored options. Check that we don't get "unused during compilation" errors.
 // RUN: %clang_cl /c \
 // RUN:    /analyze- \
-// RUN:    /bigobj \
 // RUN:    /cgthreads4 \
 // RUN:    /cgthreads8 \
 // RUN:    /d2Zi+ \
@@ -301,8 +297,6 @@
 // RUN:     /Gr \
 // RUN:     /GS \
 // RUN:     /GT \
-// RUN:     /guard:cf \
-// RUN:     /guard:cf- \
 // RUN:     /GX \
 // RUN:     /Gv \
 // RUN:     /Gz \
@@ -367,25 +361,17 @@
 // ThreadSafeStatics-NOT: "-fno-threadsafe-statics"
 
 // RUN: %clang_cl /Zi /c -### -- %s 2>&1 | FileCheck -check-prefix=Zi %s
+// Zi: "-gline-tables-only"
 // Zi: "-gcodeview"
-// Zi: "-debug-info-kind=line-tables-only"
 
 // RUN: %clang_cl /Z7 /c -### -- %s 2>&1 | FileCheck -check-prefix=Z7 %s
+// Z7: "-gline-tables-only"
 // Z7: "-gcodeview"
-// Z7: "-debug-info-kind=line-tables-only"
 
-// This test was super sneaky: "/Z7" means "line-tables", but "-gdwarf" occurs
-// later on the command line, so it should win. Interestingly the cc1 arguments
-// came out right, but had wrong semantics, because an invariant assumed by
-// CompilerInvocation was violated: it expects that at most one of {gdwarfN,
-// line-tables-only} appear. If you assume that, then you can safely use
-// Args.hasArg to test whether a boolean flag is present without caring
-// where it appeared. And for this test, it appeared to the left of -gdwarf
-// which made it "win". This test could not detect that bug.
 // RUN: %clang_cl /Z7 -gdwarf /c -### -- %s 2>&1 | FileCheck -check-prefix=Z7_gdwarf %s
+// Z7_gdwarf: "-gline-tables-only"
 // Z7_gdwarf: "-gcodeview"
-// Z7_gdwarf: "-debug-info-kind=limited"
-// Z7_gdwarf: "-dwarf-version=4"
+// Z7_gdwarf: "-gdwarf-4"
 
 // RUN: %clang_cl -fmsc-version=1800 -TP -### -- %s 2>&1 | FileCheck -check-prefix=CXX11 %s
 // CXX11: -std=c++11
@@ -413,10 +399,6 @@
 // RUN:     -fno-strict-aliasing \
 // RUN:     -fstrict-aliasing \
 // RUN:     -fsyntax-only \
-// RUN:     -fms-compatibility \
-// RUN:     -fno-ms-compatibility \
-// RUN:     -fms-extensions \
-// RUN:     -fno-ms-extensions \
 // RUN:     -mllvm -disable-llvm-optzns \
 // RUN:     -Wunused-variable \
 // RUN:     -fmacro-backtrace-limit=0 \

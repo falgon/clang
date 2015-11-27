@@ -11,6 +11,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "clang/StaticAnalyzer/Core/PathDiagnosticConsumers.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/Basic/FileManager.h"
@@ -21,8 +22,6 @@
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "clang/StaticAnalyzer/Core/BugReporter/PathDiagnostic.h"
 #include "clang/StaticAnalyzer/Core/CheckerManager.h"
-#include "clang/StaticAnalyzer/Core/IssueHash.h"
-#include "clang/StaticAnalyzer/Core/PathDiagnosticConsumers.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -127,7 +126,7 @@ void HTMLDiagnostics::ReportDiag(const PathDiagnostic& D,
   assert(!path.empty());
   FileID FID =
     (*path.begin())->getLocation().asLocation().getExpansionLoc().getFileID();
-  assert(FID.isValid());
+  assert(!FID.isInvalid());
 
   // Create a new rewriter to generate HTML.
   Rewriter R(const_cast<SourceManager&>(SMgr), PP.getLangOpts());
@@ -237,13 +236,6 @@ void HTMLDiagnostics::ReportDiag(const PathDiagnostic& D,
     if (!BugType.empty())
       os << "\n<!-- BUGTYPE " << BugType << " -->\n";
 
-    PathDiagnosticLocation UPDLoc = D.getUniqueingLoc();
-    FullSourceLoc L(SMgr.getExpansionLoc(UPDLoc.isValid()
-                                             ? UPDLoc.asLocation()
-                                             : D.getLocation().asLocation()),
-                    SMgr);
-    const Decl *DeclWithIssue = D.getDeclWithIssue();
-
     StringRef BugCategory = D.getCategory();
     if (!BugCategory.empty())
       os << "\n<!-- BUGCATEGORY " << BugCategory << " -->\n";
@@ -253,10 +245,6 @@ void HTMLDiagnostics::ReportDiag(const PathDiagnostic& D,
     os << "\n<!-- FILENAME " << llvm::sys::path::filename(Entry->getName()) << " -->\n";
 
     os  << "\n<!-- FUNCTIONNAME " <<  declName << " -->\n";
-
-    os << "\n<!-- ISSUEHASHCONTENTOFLINEINCONTEXT "
-       << GetIssueHash(SMgr, L, D.getCheckName(), D.getBugType(), DeclWithIssue)
-       << " -->\n";
 
     os << "\n<!-- BUGLINE "
        << LineNumber
@@ -293,12 +281,7 @@ void HTMLDiagnostics::ReportDiag(const PathDiagnostic& D,
 
   if (!AnalyzerOpts.shouldWriteStableReportFilename()) {
       llvm::sys::path::append(Model, Directory, "report-%%%%%%.html");
-      if (std::error_code EC =
-          llvm::sys::fs::make_absolute(Model)) {
-          llvm::errs() << "warning: could not make '" << Model
-                       << "' absolute: " << EC.message() << '\n';
-        return;
-      }
+
       if (std::error_code EC =
           llvm::sys::fs::createUniqueFile(Model, FD, ResultPath)) {
           llvm::errs() << "warning: could not create file in '" << Directory

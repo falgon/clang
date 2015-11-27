@@ -59,7 +59,6 @@ def Named : Decl<1>;
       def VarTemplate : DDecl<RedeclarableTemplate>;
       def TypeAliasTemplate : DDecl<RedeclarableTemplate>;
     def TemplateTemplateParm : DDecl<Template>;
-    def BuiltinTemplate : DDecl<Template>;
   def Using : DDecl<Named>;
   def UsingShadow : DDecl<Named>;
   def ObjCMethod : DDecl<Named>, DeclContext;
@@ -84,5 +83,13 @@ def Captured : Decl, DeclContext;
 def ClassScopeFunctionSpecialization : Decl;
 def Import : Decl;
 def OMPThreadPrivate : Decl;
+//@@
+def Escape : Decl;
+def Inline : Decl;
+def Execute : Decl, DeclContext;
+def Def : Decl, DeclContext;
+def PreprocessorDirective : Decl;
+def QuasiQuotes : Decl, DeclContext;
+//@@
 def Empty : Decl;
 

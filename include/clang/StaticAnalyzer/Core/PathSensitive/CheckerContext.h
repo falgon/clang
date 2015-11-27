@@ -224,37 +224,11 @@ public:
   }
 
   /// \brief Generate a sink node. Generating a sink stops exploration of the
-  /// given path. To create a sink node for the purpose of reporting an error,
-  /// checkers should use generateErrorNode() instead.
-  ExplodedNode *generateSink(ProgramStateRef State, ExplodedNode *Pred,
+  /// given path.
+  ExplodedNode *generateSink(ProgramStateRef State = nullptr,
+                             ExplodedNode *Pred = nullptr,
                              const ProgramPointTag *Tag = nullptr) {
     return addTransitionImpl(State ? State : getState(), true, Pred, Tag);
-  }
-
-  /// \brief Generate a transition to a node that will be used to report
-  /// an error. This node will be a sink. That is, it will stop exploration of
-  /// the given path.
-  ///
-  /// @param State The state of the generated node.
-  /// @param Tag The tag to uniquely identify the creation site. If null,
-  ///        the default tag for the checker will be used.
-  ExplodedNode *generateErrorNode(ProgramStateRef State = nullptr,
-                                  const ProgramPointTag *Tag = nullptr) {
-    return generateSink(State, Pred,
-                       (Tag ? Tag : Location.getTag()));
-  }
-
-  /// \brief Generate a transition to a node that will be used to report
-  /// an error. This node will not be a sink. That is, exploration will
-  /// continue along this path.
-  ///
-  /// @param State The state of the generated node.
-  /// @param Tag The tag to uniquely identify the creation site. If null,
-  ///        the default tag for the checker will be used.
-  ExplodedNode *
-  generateNonFatalErrorNode(ProgramStateRef State = nullptr,
-                            const ProgramPointTag *Tag = nullptr) {
-    return addTransition(State, (Tag ? Tag : Location.getTag()));
   }
 
   /// \brief Emit the diagnostics report.
@@ -313,19 +287,10 @@ private:
                                  bool MarkAsSink,
                                  ExplodedNode *P = nullptr,
                                  const ProgramPointTag *Tag = nullptr) {
-    // The analyzer may stop exploring if it sees a state it has previously
-    // visited ("cache out"). The early return here is a defensive check to
-    // prevent accidental caching out by checker API clients. Unless there is a
-    // tag or the the client checker has requested that the generated node be
-    // marked as a sink, we assume that a client requesting a transition to a
-    // state that is the same as the predecessor state has made a mistake. We
-    // return the predecessor rather than cache out.
-    //
-    // TODO: We could potentially change the return to an assertion to alert
-    // clients to their mistake, but several checkers (including
-    // DereferenceChecker, CallAndMessageChecker, and DynamicTypePropagation)
-    // rely upon the defensive behavior and would need to be updated.
-    if (!State || (State == Pred->getState() && !Tag && !MarkAsSink))
+    // It may not be safe to use the "Pred" node with no tag because the "Pred"
+    // node may be recycled in the reclamation function.
+    if (!State || (State == Pred->getState() && !Tag && !MarkAsSink &&
+                   Pred->getLocation().getTag()))
       return Pred;
 
     Changed = true;

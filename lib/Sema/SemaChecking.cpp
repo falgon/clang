@@ -112,39 +112,6 @@ static bool SemaBuiltinAddressof(Sema &S, CallExpr *TheCall) {
   return false;
 }
 
-static bool SemaBuiltinOverflow(Sema &S, CallExpr *TheCall) {
-  if (checkArgCount(S, TheCall, 3))
-    return true;
-
-  // First two arguments should be integers.
-  for (unsigned I = 0; I < 2; ++I) {
-    Expr *Arg = TheCall->getArg(I);
-    QualType Ty = Arg->getType();
-    if (!Ty->isIntegerType()) {
-      S.Diag(Arg->getLocStart(), diag::err_overflow_builtin_must_be_int)
-          << Ty << Arg->getSourceRange();
-      return true;
-    }
-  }
-
-  // Third argument should be a pointer to a non-const integer.
-  // IRGen correctly handles volatile, restrict, and address spaces, and
-  // the other qualifiers aren't possible.
-  {
-    Expr *Arg = TheCall->getArg(2);
-    QualType Ty = Arg->getType();
-    const auto *PtrTy = Ty->getAs<PointerType>();
-    if (!(PtrTy && PtrTy->getPointeeType()->isIntegerType() &&
-          !PtrTy->getPointeeType().isConstQualified())) {
-      S.Diag(Arg->getLocStart(), diag::err_overflow_builtin_must_be_ptr_int)
-          << Ty << Arg->getSourceRange();
-      return true;
-    }
-  }
-
-  return false;
-}
-
 static void SemaBuiltinMemChkCall(Sema &S, FunctionDecl *FDecl,
 		                  CallExpr *TheCall, unsigned SizeIdx,
                                   unsigned DstSizeIdx) {
@@ -474,9 +441,6 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
   case Builtin::BI__sync_swap_8:
   case Builtin::BI__sync_swap_16:
     return SemaBuiltinAtomicOverloaded(TheCallResult);
-  case Builtin::BI__builtin_nontemporal_load:
-  case Builtin::BI__builtin_nontemporal_store:
-    return SemaBuiltinNontemporalOverloaded(TheCallResult);
 #define BUILTIN(ID, TYPE, ATTRS)
 #define ATOMIC_BUILTIN(ID, TYPE, ATTRS) \
   case Builtin::BI##ID: \
@@ -488,12 +452,6 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
     break;
   case Builtin::BI__builtin_addressof:
     if (SemaBuiltinAddressof(*this, TheCall))
-      return ExprError();
-    break;
-  case Builtin::BI__builtin_add_overflow:
-  case Builtin::BI__builtin_sub_overflow:
-  case Builtin::BI__builtin_mul_overflow:
-    if (SemaBuiltinOverflow(*this, TheCall))
       return ExprError();
     break;
   case Builtin::BI__builtin_operator_new:
@@ -568,7 +526,7 @@ Sema::CheckBuiltinFunctionCall(FunctionDecl *FDecl, unsigned BuiltinID,
 
   // Since the target specific builtins for each arch overlap, only check those
   // of the arch we are compiling for.
-  if (Context.BuiltinInfo.isTSBuiltin(BuiltinID)) {
+  if (BuiltinID >= Builtin::FirstTSBuiltin) {
     switch (Context.getTargetInfo().getTriple().getArch()) {
       case llvm::Triple::arm:
       case llvm::Triple::armeb:
@@ -1070,34 +1028,12 @@ bool Sema::CheckSystemZBuiltinFunctionCall(unsigned BuiltinID,
   return SemaBuiltinConstantArgRange(TheCall, i, l, u);
 }
 
-/// SemaBuiltinCpuSupports - Handle __builtin_cpu_supports(char *).
-/// This checks that the target supports __builtin_cpu_supports and
-/// that the string argument is constant and valid.
-static bool SemaBuiltinCpuSupports(Sema &S, CallExpr *TheCall) {
-  Expr *Arg = TheCall->getArg(0);
-
-  // Check if the argument is a string literal.
-  if (!isa<StringLiteral>(Arg->IgnoreParenImpCasts()))
-    return S.Diag(TheCall->getLocStart(), diag::err_expr_not_string_literal)
-           << Arg->getSourceRange();
-
-  // Check the contents of the string.
-  StringRef Feature =
-      cast<StringLiteral>(Arg->IgnoreParenImpCasts())->getString();
-  if (!S.Context.getTargetInfo().validateCpuSupports(Feature))
-    return S.Diag(TheCall->getLocStart(), diag::err_invalid_cpu_supports)
-           << Arg->getSourceRange();
-  return false;
-}
-
 bool Sema::CheckX86BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall) {
   unsigned i = 0, l = 0, u = 0;
   switch (BuiltinID) {
   default: return false;
   case X86::BI__builtin_cpu_supports:
-    return SemaBuiltinCpuSupports(*this, TheCall);
-  case X86::BI__builtin_ms_va_start:
-    return SemaBuiltinMSVAStart(TheCall);
+    return SemaBuiltinCpuSupports(TheCall);
   case X86::BI_mm_prefetch: i = 1; l = 0; u = 3; break;
   case X86::BI__builtin_ia32_sha1rnds4: i = 2, l = 0; u = 3; break;
   case X86::BI__builtin_ia32_vpermil2pd:
@@ -1210,8 +1146,7 @@ static void CheckNonNullArgument(Sema &S,
                                  const Expr *ArgExpr,
                                  SourceLocation CallSiteLoc) {
   if (CheckNonNullExpr(S, ArgExpr))
-    S.DiagRuntimeBehavior(CallSiteLoc, ArgExpr,
-           S.PDiag(diag::warn_null_arg) << ArgExpr->getSourceRange());
+    S.Diag(CallSiteLoc, diag::warn_null_arg) << ArgExpr->getSourceRange();
 }
 
 bool Sema::GetFormatNSStringIdx(const FormatAttr *Format, unsigned &Idx) {
@@ -1704,12 +1639,6 @@ ExprResult Sema::SemaAtomicOpsOverloaded(ExprResult TheCallResult,
       return ExprError();
     }
     ValType = AtomTy->getAs<AtomicType>()->getValueType();
-  } else if (Form != Load && Op != AtomicExpr::AO__atomic_load) {
-    if (ValType.isConstQualified()) {
-      Diag(DRE->getLocStart(), diag::err_atomic_op_needs_non_const_pointer)
-        << Ptr->getType() << Ptr->getSourceRange();
-      return ExprError();
-    }
   }
 
   // For an arithmetic operation, the implied arithmetic must be well-formed.
@@ -1747,6 +1676,9 @@ ExprResult Sema::SemaAtomicOpsOverloaded(ExprResult TheCallResult,
     return ExprError();
   }
 
+  // FIXME: For any builtin other than a load, the ValType must not be
+  // const-qualified.
+
   switch (ValType.getObjCLifetime()) {
   case Qualifiers::OCL_None:
   case Qualifiers::OCL_ExplicitNone:
@@ -1778,10 +1710,6 @@ ExprResult Sema::SemaAtomicOpsOverloaded(ExprResult TheCallResult,
   QualType ByValType = ValType; // 'CP'
   if (!IsC11 && !IsN)
     ByValType = Ptr->getType();
-
-  // FIXME: __atomic_load allows the first argument to be a a pointer to const
-  // but not the second argument. We need to manually remove possible const
-  // qualifiers.
 
   // The first argument --- the pointer --- has a fixed type; we
   // deduce the types of the rest of the arguments accordingly.  Walk
@@ -2282,78 +2210,6 @@ Sema::SemaBuiltinAtomicOverloaded(ExprResult TheCallResult) {
   return TheCallResult;
 }
 
-/// SemaBuiltinNontemporalOverloaded - We have a call to
-/// __builtin_nontemporal_store or __builtin_nontemporal_load, which is an
-/// overloaded function based on the pointer type of its last argument.
-///
-/// This function goes through and does final semantic checking for these
-/// builtins.
-ExprResult Sema::SemaBuiltinNontemporalOverloaded(ExprResult TheCallResult) {
-  CallExpr *TheCall = (CallExpr *)TheCallResult.get();
-  DeclRefExpr *DRE =
-      cast<DeclRefExpr>(TheCall->getCallee()->IgnoreParenCasts());
-  FunctionDecl *FDecl = cast<FunctionDecl>(DRE->getDecl());
-  unsigned BuiltinID = FDecl->getBuiltinID();
-  assert((BuiltinID == Builtin::BI__builtin_nontemporal_store ||
-          BuiltinID == Builtin::BI__builtin_nontemporal_load) &&
-         "Unexpected nontemporal load/store builtin!");
-  bool isStore = BuiltinID == Builtin::BI__builtin_nontemporal_store;
-  unsigned numArgs = isStore ? 2 : 1;
-
-  // Ensure that we have the proper number of arguments.
-  if (checkArgCount(*this, TheCall, numArgs))
-    return ExprError();
-
-  // Inspect the last argument of the nontemporal builtin.  This should always
-  // be a pointer type, from which we imply the type of the memory access.
-  // Because it is a pointer type, we don't have to worry about any implicit
-  // casts here.
-  Expr *PointerArg = TheCall->getArg(numArgs - 1);
-  ExprResult PointerArgResult =
-      DefaultFunctionArrayLvalueConversion(PointerArg);
-
-  if (PointerArgResult.isInvalid())
-    return ExprError();
-  PointerArg = PointerArgResult.get();
-  TheCall->setArg(numArgs - 1, PointerArg);
-
-  const PointerType *pointerType = PointerArg->getType()->getAs<PointerType>();
-  if (!pointerType) {
-    Diag(DRE->getLocStart(), diag::err_nontemporal_builtin_must_be_pointer)
-        << PointerArg->getType() << PointerArg->getSourceRange();
-    return ExprError();
-  }
-
-  QualType ValType = pointerType->getPointeeType();
-
-  // Strip any qualifiers off ValType.
-  ValType = ValType.getUnqualifiedType();
-  if (!ValType->isIntegerType() && !ValType->isAnyPointerType() &&
-      !ValType->isBlockPointerType() && !ValType->isFloatingType() &&
-      !ValType->isVectorType()) {
-    Diag(DRE->getLocStart(),
-         diag::err_nontemporal_builtin_must_be_pointer_intfltptr_or_vector)
-        << PointerArg->getType() << PointerArg->getSourceRange();
-    return ExprError();
-  }
-
-  if (!isStore) {
-    TheCall->setType(ValType);
-    return TheCallResult;
-  }
-
-  ExprResult ValArg = TheCall->getArg(0);
-  InitializedEntity Entity = InitializedEntity::InitializeParameter(
-      Context, ValType, /*consume*/ false);
-  ValArg = PerformCopyInitialization(Entity, SourceLocation(), ValArg);
-  if (ValArg.isInvalid())
-    return ExprError();
-
-  TheCall->setArg(0, ValArg.get());
-  TheCall->setType(Context.VoidTy);
-  return TheCallResult;
-}
-
 /// CheckObjCString - Checks that the argument to the builtin
 /// CFString constructor is correct
 /// Note: It might also make sense to do the UTF-16 conversion here (would
@@ -2386,10 +2242,9 @@ bool Sema::CheckObjCString(Expr *Arg) {
   return false;
 }
 
-/// Check the arguments to '__builtin_va_start' or '__builtin_ms_va_start'
-/// for validity.  Emit an error and return true on failure; return false
-/// on success.
-bool Sema::SemaBuiltinVAStartImpl(CallExpr *TheCall) {
+/// SemaBuiltinVAStart - Check the arguments to __builtin_va_start for validity.
+/// Emit an error and return true on failure, return false on success.
+bool Sema::SemaBuiltinVAStart(CallExpr *TheCall) {
   Expr *Fn = TheCall->getCallee();
   if (TheCall->getNumArgs() > 2) {
     Diag(TheCall->getArg(2)->getLocStart(),
@@ -2465,48 +2320,6 @@ bool Sema::SemaBuiltinVAStartImpl(CallExpr *TheCall) {
 
   TheCall->setType(Context.VoidTy);
   return false;
-}
-
-/// Check the arguments to '__builtin_va_start' for validity, and that
-/// it was called from a function of the native ABI.
-/// Emit an error and return true on failure; return false on success.
-bool Sema::SemaBuiltinVAStart(CallExpr *TheCall) {
-  // On x86-64 Unix, don't allow this in Win64 ABI functions.
-  // On x64 Windows, don't allow this in System V ABI functions.
-  // (Yes, that means there's no corresponding way to support variadic
-  // System V ABI functions on Windows.)
-  if (Context.getTargetInfo().getTriple().getArch() == llvm::Triple::x86_64) {
-    unsigned OS = Context.getTargetInfo().getTriple().getOS();
-    clang::CallingConv CC = CC_C;
-    if (const FunctionDecl *FD = getCurFunctionDecl())
-      CC = FD->getType()->getAs<FunctionType>()->getCallConv();
-    if ((OS == llvm::Triple::Win32 && CC == CC_X86_64SysV) ||
-        (OS != llvm::Triple::Win32 && CC == CC_X86_64Win64))
-      return Diag(TheCall->getCallee()->getLocStart(),
-                  diag::err_va_start_used_in_wrong_abi_function)
-             << (OS != llvm::Triple::Win32);
-  }
-  return SemaBuiltinVAStartImpl(TheCall);
-}
-
-/// Check the arguments to '__builtin_ms_va_start' for validity, and that
-/// it was called from a Win64 ABI function.
-/// Emit an error and return true on failure; return false on success.
-bool Sema::SemaBuiltinMSVAStart(CallExpr *TheCall) {
-  // This only makes sense for x86-64.
-  const llvm::Triple &TT = Context.getTargetInfo().getTriple();
-  Expr *Callee = TheCall->getCallee();
-  if (TT.getArch() != llvm::Triple::x86_64)
-    return Diag(Callee->getLocStart(), diag::err_x86_builtin_32_bit_tgt);
-  // Don't allow this in System V ABI functions.
-  clang::CallingConv CC = CC_C;
-  if (const FunctionDecl *FD = getCurFunctionDecl())
-    CC = FD->getType()->getAs<FunctionType>()->getCallConv();
-  if (CC == CC_X86_64SysV ||
-      (TT.getOS() != llvm::Triple::Win32 && CC != CC_X86_64Win64))
-    return Diag(Callee->getLocStart(),
-                diag::err_ms_va_start_used_in_sysv_function);
-  return SemaBuiltinVAStartImpl(TheCall);
 }
 
 bool Sema::SemaBuiltinVAStartARM(CallExpr *Call) {
@@ -2969,6 +2782,26 @@ bool Sema::SemaBuiltinARMSpecialReg(unsigned BuiltinID, CallExpr *TheCall,
     return SemaBuiltinConstantArgRange(TheCall, 1, 0, 15);
   }
 
+  return false;
+}
+
+/// SemaBuiltinCpuSupports - Handle __builtin_cpu_supports(char *).
+/// This checks that the target supports __builtin_cpu_supports and
+/// that the string argument is constant and valid.
+bool Sema::SemaBuiltinCpuSupports(CallExpr *TheCall) {
+  Expr *Arg = TheCall->getArg(0);
+
+  // Check if the argument is a string literal.
+  if (!isa<StringLiteral>(Arg->IgnoreParenImpCasts()))
+    return Diag(TheCall->getLocStart(), diag::err_expr_not_string_literal)
+           << Arg->getSourceRange();
+
+  // Check the contents of the string.
+  StringRef Feature =
+      cast<StringLiteral>(Arg->IgnoreParenImpCasts())->getString();
+  if (!Context.getTargetInfo().validateCpuSupports(Feature))
+    return Diag(TheCall->getLocStart(), diag::err_invalid_cpu_supports)
+           << Arg->getSourceRange();
   return false;
 }
 
@@ -5085,19 +4918,6 @@ void Sema::CheckAbsoluteValueFunction(const CallExpr *Call,
     return;
   }
 
-  // Taking the absolute value of a pointer is very suspicious, they probably
-  // wanted to index into an array, dereference a pointer, call a function, etc.
-  if (ArgType->isPointerType() || ArgType->canDecayToPointerType()) {
-    unsigned DiagType = 0;
-    if (ArgType->isFunctionType())
-      DiagType = 1;
-    else if (ArgType->isArrayType())
-      DiagType = 2;
-
-    Diag(Call->getExprLoc(), diag::warn_pointer_abs) << DiagType << ArgType;
-    return;
-  }
-
   // std::abs has overloads which prevent most of the absolute value problems
   // from occurring.
   if (IsStdAbs)
@@ -5646,15 +5466,17 @@ CheckReturnStackAddr(Sema &S, Expr *RetValExp, QualType lhsType,
   }
 
   if (DeclRefExpr *DR = dyn_cast<DeclRefExpr>(stackE)) { //address of local var.
-    S.Diag(diagLoc, diag::warn_ret_stack_addr_ref) << lhsType->isReferenceType()
+    S.Diag(diagLoc, lhsType->isReferenceType() ? diag::warn_ret_stack_ref
+                                             : diag::warn_ret_stack_addr)
      << DR->getDecl()->getDeclName() << diagRange;
   } else if (isa<BlockExpr>(stackE)) { // local block.
     S.Diag(diagLoc, diag::err_ret_local_block) << diagRange;
   } else if (isa<AddrLabelExpr>(stackE)) { // address of label.
     S.Diag(diagLoc, diag::warn_ret_addr_label) << diagRange;
   } else { // local temporary.
-    S.Diag(diagLoc, diag::warn_ret_local_temp_addr_ref)
-     << lhsType->isReferenceType() << diagRange;
+    S.Diag(diagLoc, lhsType->isReferenceType() ? diag::warn_ret_local_temp_ref
+                                               : diag::warn_ret_local_temp_addr)
+     << diagRange;
   }
 
   // Display the "trail" of reference variables that we followed until we
@@ -7267,14 +7089,6 @@ void CheckImplicitConversion(Sema &S, Expr *E, QualType T,
           return;
 
         DiagnoseImpCast(S, E, T, CC, diag::warn_impcast_float_precision);
-
-      }
-      // ... or possibly if we're increasing rank, too
-      else if (TargetBT->getKind() > SourceBT->getKind()) {
-        if (S.SourceMgr.isInSystemMacro(CC))
-          return;
-
-        DiagnoseImpCast(S, E, T, CC, diag::warn_impcast_double_promotion);
       }
       return;
     }
@@ -7493,16 +7307,18 @@ void AnalyzeImplicitConversions(Sema &S, Expr *OrigE, SourceLocation CC) {
     CheckImplicitConversion(S, E, T, CC);
 
   // Now continue drilling into this expression.
-
-  if (PseudoObjectExpr *POE = dyn_cast<PseudoObjectExpr>(E)) {
-    // The bound subexpressions in a PseudoObjectExpr are not reachable
-    // as transitive children.
-    // FIXME: Use a more uniform representation for this.
-    for (auto *SE : POE->semantics())
-      if (auto *OVE = dyn_cast<OpaqueValueExpr>(SE))
-        AnalyzeImplicitConversions(S, OVE->getSourceExpr(), CC);
+  
+  if (PseudoObjectExpr * POE = dyn_cast<PseudoObjectExpr>(E)) {
+    if (POE->getResultExpr())
+      E = POE->getResultExpr();
   }
-
+  
+  if (const OpaqueValueExpr *OVE = dyn_cast<OpaqueValueExpr>(E)) {
+    if (OVE->getSourceExpr())
+      AnalyzeImplicitConversions(S, OVE->getSourceExpr(), CC);
+    return;
+  }
+  
   // Skip past explicit casts.
   if (isa<ExplicitCastExpr>(E)) {
     E = cast<ExplicitCastExpr>(E)->getSubExpr()->IgnoreParenImpCasts();

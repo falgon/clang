@@ -120,7 +120,8 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
     FieldCollector.reset(new CXXFieldCollector());
 
   // Tell diagnostics how to render things from the AST library.
-  Diags.SetArgToStringFn(&FormatASTNodeDiagnosticArgument, &Context);
+  PP.getDiagnostics().SetArgToStringFn(&FormatASTNodeDiagnosticArgument,
+                                       &Context);
 
   ExprEvalContexts.emplace_back(PotentiallyEvaluated, 0, false, nullptr, false);
 
@@ -128,6 +129,19 @@ Sema::Sema(Preprocessor &pp, ASTContext &ctxt, ASTConsumer &consumer,
 
   // Initilization of data sharing attributes stack for OpenMP
   InitDataSharingAttributesStack();
+
+//@@
+  class MetaExternalSemaSource : public clang::ExternalSemaSource {
+  public:
+	virtual bool LookupUnqualified(LookupResult &R, Scope *S) {
+		if (R.empty() && !R.wasNotFoundInCurrentInstantiation())
+			R.setNotFoundInCurrentInstantiation();
+		return false;
+	}
+  };
+  //@@@
+  //addExternalSource(new MetaExternalSemaSource);
+//@@
 }
 
 void Sema::addImplicitTypedef(StringRef Name, QualType T) {
@@ -167,7 +181,7 @@ void Sema::Initialize() {
 
 
   // Initialize predefined Objective-C types:
-  if (getLangOpts().ObjC1) {
+  if (PP.getLangOpts().ObjC1) {
     // If 'SEL' does not yet refer to any declarations, make it refer to the
     // predefined 'SEL'.
     DeclarationName SEL = &Context.Idents.get("SEL");
@@ -192,8 +206,8 @@ void Sema::Initialize() {
   }
 
   // Initialize Microsoft "predefined C++ types".
-  if (getLangOpts().MSVCCompat) {
-    if (getLangOpts().CPlusPlus &&
+  if (PP.getLangOpts().MSVCCompat) {
+    if (PP.getLangOpts().CPlusPlus &&
         IdResolver.begin(&Context.Idents.get("type_info")) == IdResolver.end())
       PushOnScopeChains(Context.buildImplicitRecord("type_info", TTK_Class),
                         TUScope);
@@ -202,7 +216,7 @@ void Sema::Initialize() {
   }
 
   // Initialize predefined OpenCL types.
-  if (getLangOpts().OpenCL) {
+  if (PP.getLangOpts().OpenCL) {
     addImplicitTypedef("image1d_t", Context.OCLImage1dTy);
     addImplicitTypedef("image1d_array_t", Context.OCLImage1dArrayTy);
     addImplicitTypedef("image1d_buffer_t", Context.OCLImage1dBufferTy);
@@ -212,18 +226,6 @@ void Sema::Initialize() {
     addImplicitTypedef("sampler_t", Context.OCLSamplerTy);
     addImplicitTypedef("event_t", Context.OCLEventTy);
     if (getLangOpts().OpenCLVersion >= 200) {
-      addImplicitTypedef("image2d_depth_t", Context.OCLImage2dDepthTy);
-      addImplicitTypedef("image2d_array_depth_t",
-                         Context.OCLImage2dArrayDepthTy);
-      addImplicitTypedef("image2d_msaa_t", Context.OCLImage2dMSAATy);
-      addImplicitTypedef("image2d_array_msaa_t", Context.OCLImage2dArrayMSAATy);
-      addImplicitTypedef("image2d_msaa_depth_t", Context.OCLImage2dMSAADepthTy);
-      addImplicitTypedef("image2d_array_msaa_depth_t",
-                         Context.OCLImage2dArrayMSAADepthTy);
-      addImplicitTypedef("clk_event_t", Context.OCLClkEventTy);
-      addImplicitTypedef("queue_t", Context.OCLQueueTy);
-      addImplicitTypedef("ndrange_t", Context.OCLNDRangeTy);
-      addImplicitTypedef("reserve_id_t", Context.OCLReserveIDTy);
       addImplicitTypedef("atomic_int", Context.getAtomicType(Context.IntTy));
       addImplicitTypedef("atomic_uint",
                          Context.getAtomicType(Context.UnsignedIntTy));
@@ -246,12 +248,6 @@ void Sema::Initialize() {
       addImplicitTypedef("atomic_ptrdiff_t",
                          Context.getAtomicType(Context.getPointerDiffType()));
     }
-  }
-
-  if (Context.getTargetInfo().hasBuiltinMSVaList()) {
-    DeclarationName MSVaList = &Context.Idents.get("__builtin_ms_va_list");
-    if (IdResolver.begin(MSVaList) == IdResolver.end())
-      PushOnScopeChains(Context.getBuiltinMSVaListDecl(), TUScope);
   }
 
   DeclarationName BuiltinVaList = &Context.Idents.get("__builtin_va_list");
@@ -295,7 +291,7 @@ Sema::~Sema() {
 /// make the relevant declaration unavailable instead of erroring, do
 /// so and return true.
 bool Sema::makeUnavailableInSystemHeader(SourceLocation loc,
-                                      UnavailableAttr::ImplicitReason reason) {
+                                         StringRef msg) {
   // If we're not in a function, it's an error.
   FunctionDecl *fn = dyn_cast<FunctionDecl>(CurContext);
   if (!fn) return false;
@@ -311,7 +307,7 @@ bool Sema::makeUnavailableInSystemHeader(SourceLocation loc,
   // If the function is already unavailable, it's not an error.
   if (fn->hasAttr<UnavailableAttr>()) return true;
 
-  fn->addAttr(UnavailableAttr::CreateImplicit(Context, "", reason, loc));
+  fn->addAttr(UnavailableAttr::CreateImplicit(Context, msg, loc));
   return true;
 }
 
@@ -726,15 +722,8 @@ void Sema::ActOnEndOfTranslationUnit() {
     if (WeakID.second.getUsed())
       continue;
 
-    Decl *PrevDecl = LookupSingleName(TUScope, WeakID.first, SourceLocation(),
-                                      LookupOrdinaryName);
-    if (PrevDecl != nullptr &&
-        !(isa<FunctionDecl>(PrevDecl) || isa<VarDecl>(PrevDecl)))
-      Diag(WeakID.second.getLocation(), diag::warn_attribute_wrong_decl_type)
-          << "'weak'" << ExpectedVariableOrFunction;
-    else
-      Diag(WeakID.second.getLocation(), diag::warn_weak_identifier_undeclared)
-          << WeakID.first;
+    Diag(WeakID.second.getLocation(), diag::warn_weak_identifier_undeclared)
+        << WeakID.first;
   }
 
   if (LangOpts.CPlusPlus11 &&
@@ -959,6 +948,15 @@ NamedDecl *Sema::getCurFunctionOrMethodDecl() {
     return cast<NamedDecl>(DC);
   return nullptr;
 }
+
+//@@
+QuasiQuotesDecl *Sema::getCurQuasiQuotesDecl() {
+  DeclContext *DC = CurContext;
+  while (DC && !isa<QuasiQuotesDecl>(DC))
+    DC = DC->getParent();
+  return dyn_cast_or_null<QuasiQuotesDecl>(DC);
+}
+//@@
 
 void Sema::EmitCurrentDiagnostic(unsigned DiagID) {
   // FIXME: It doesn't make sense to me that DiagID is an incoming argument here
@@ -1468,7 +1466,7 @@ bool Sema::tryToRecoverWithCall(ExprResult &E, const PartialDiagnostic &PD,
     // arguments and that it returns something of a reasonable type,
     // so we can emit a fixit and carry on pretending that E was
     // actually a CallExpr.
-    SourceLocation ParenInsertionLoc = getLocForEndOfToken(Range.getEnd());
+    SourceLocation ParenInsertionLoc = PP.getLocForEndOfToken(Range.getEnd());
     Diag(Loc, PD)
       << /*zero-arg*/ 1 << Range
       << (IsCallableWithAppend(E.get())

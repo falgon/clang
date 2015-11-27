@@ -14,7 +14,6 @@
 #include "clang/Frontend/CodeGenOptions.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
 #include "clang/Frontend/Utils.h"
-#include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
@@ -194,20 +193,14 @@ static void addSanitizerCoveragePass(const PassManagerBuilder &Builder,
 
 static void addAddressSanitizerPasses(const PassManagerBuilder &Builder,
                                       legacy::PassManagerBase &PM) {
-  const PassManagerBuilderWrapper &BuilderWrapper =
-      static_cast<const PassManagerBuilderWrapper&>(Builder);
-  const CodeGenOptions &CGOpts = BuilderWrapper.getCGOpts();
-  bool Recover = CGOpts.SanitizeRecover.has(SanitizerKind::Address);
-  PM.add(createAddressSanitizerFunctionPass(/*CompileKernel*/false, Recover));
-  PM.add(createAddressSanitizerModulePass(/*CompileKernel*/false, Recover));
+  PM.add(createAddressSanitizerFunctionPass(/*CompileKernel*/false));
+  PM.add(createAddressSanitizerModulePass(/*CompileKernel*/false));
 }
 
 static void addKernelAddressSanitizerPasses(const PassManagerBuilder &Builder,
                                             legacy::PassManagerBase &PM) {
-  PM.add(createAddressSanitizerFunctionPass(/*CompileKernel*/true,
-                                            /*Recover*/true));
-  PM.add(createAddressSanitizerModulePass(/*CompileKernel*/true,
-                                          /*Recover*/true));
+  PM.add(createAddressSanitizerFunctionPass(/*CompileKernel*/true));
+  PM.add(createAddressSanitizerModulePass(/*CompileKernel*/true));
 }
 
 static void addMemorySanitizerPass(const PassManagerBuilder &Builder,
@@ -462,10 +455,14 @@ TargetMachine *EmitAssemblyHelper::CreateTargetMachine(bool MustCreateTM) {
   llvm::cl::ParseCommandLineOptions(BackendArgs.size() - 1,
                                     BackendArgs.data());
 
-  std::string FeaturesStr =
-      llvm::join(TargetOpts.Features.begin(), TargetOpts.Features.end(), ",");
+  std::string FeaturesStr;
+  if (!TargetOpts.Features.empty()) {
+    SubtargetFeatures Features;
+    for (const std::string &Feature : TargetOpts.Features)
+      Features.AddFeature(Feature);
+    FeaturesStr = Features.getString();
+  }
 
-  // Keep this synced with the equivalent code in tools/driver/cc1as_main.cpp.
   llvm::Reloc::Model RM = llvm::Reloc::Default;
   if (CodeGenOpts.RelocationModel == "static") {
     RM = llvm::Reloc::Static;
@@ -494,16 +491,24 @@ TargetMachine *EmitAssemblyHelper::CreateTargetMachine(bool MustCreateTM) {
       .Case("posix", llvm::ThreadModel::POSIX)
       .Case("single", llvm::ThreadModel::Single);
 
+  if (CodeGenOpts.DisableIntegratedAS)
+    Options.DisableIntegratedAS = true;
+
+  if (CodeGenOpts.CompressDebugSections)
+    Options.CompressDebugSections = true;
+
+  if (CodeGenOpts.UseInitArray)
+    Options.UseInitArray = true;
+
   // Set float ABI type.
-  assert((CodeGenOpts.FloatABI == "soft" || CodeGenOpts.FloatABI == "softfp" ||
-          CodeGenOpts.FloatABI == "hard" || CodeGenOpts.FloatABI.empty()) &&
-         "Invalid Floating Point ABI!");
-  Options.FloatABIType =
-      llvm::StringSwitch<llvm::FloatABI::ABIType>(CodeGenOpts.FloatABI)
-          .Case("soft", llvm::FloatABI::Soft)
-          .Case("softfp", llvm::FloatABI::Soft)
-          .Case("hard", llvm::FloatABI::Hard)
-          .Default(llvm::FloatABI::Default);
+  if (CodeGenOpts.FloatABI == "soft" || CodeGenOpts.FloatABI == "softfp")
+    Options.FloatABIType = llvm::FloatABI::Soft;
+  else if (CodeGenOpts.FloatABI == "hard")
+    Options.FloatABIType = llvm::FloatABI::Hard;
+  else {
+    assert(CodeGenOpts.FloatABI.empty() && "Invalid float abi!");
+    Options.FloatABIType = llvm::FloatABI::Default;
+  }
 
   // Set FP fusion mode.
   switch (CodeGenOpts.getFPContractMode()) {
@@ -517,17 +522,6 @@ TargetMachine *EmitAssemblyHelper::CreateTargetMachine(bool MustCreateTM) {
     Options.AllowFPOpFusion = llvm::FPOpFusion::Fast;
     break;
   }
-
-  Options.UseInitArray = CodeGenOpts.UseInitArray;
-  Options.DisableIntegratedAS = CodeGenOpts.DisableIntegratedAS;
-  Options.CompressDebugSections = CodeGenOpts.CompressDebugSections;
-
-  // Set EABI version.
-  Options.EABIVersion = llvm::StringSwitch<llvm::EABI>(CodeGenOpts.EABIVersion)
-                            .Case("4", llvm::EABI::EABI4)
-                            .Case("5", llvm::EABI::EABI5)
-                            .Case("gnu", llvm::EABI::GNU)
-                            .Default(llvm::EABI::Default);
 
   Options.LessPreciseFPMADOption = CodeGenOpts.LessPreciseFPMAD;
   Options.NoInfsFPMath = CodeGenOpts.NoInfsFPMath;
@@ -614,8 +608,8 @@ void EmitAssemblyHelper::EmitAssembly(BackendAction Action,
     break;
 
   case Backend_EmitBC:
-    getPerModulePasses()->add(createBitcodeWriterPass(
-        *OS, CodeGenOpts.EmitLLVMUseLists, CodeGenOpts.EmitFunctionSummary));
+    getPerModulePasses()->add(
+        createBitcodeWriterPass(*OS, CodeGenOpts.EmitLLVMUseLists));
     break;
 
   case Backend_EmitLL:

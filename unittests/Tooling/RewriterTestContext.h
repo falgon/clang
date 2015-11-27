@@ -34,20 +34,15 @@ namespace clang {
 /// methods, which help with writing tests that change files.
 class RewriterTestContext {
  public:
-   RewriterTestContext()
-       : DiagOpts(new DiagnosticOptions()),
-         Diagnostics(IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs),
-                     &*DiagOpts),
-         DiagnosticPrinter(llvm::outs(), &*DiagOpts),
-         InMemoryFileSystem(new vfs::InMemoryFileSystem),
-         OverlayFileSystem(
-             new vfs::OverlayFileSystem(vfs::getRealFileSystem())),
-         Files(FileSystemOptions(), OverlayFileSystem),
-         Sources(Diagnostics, Files), Rewrite(Sources, Options) {
+  RewriterTestContext()
+      : DiagOpts(new DiagnosticOptions()),
+        Diagnostics(IntrusiveRefCntPtr<DiagnosticIDs>(new DiagnosticIDs),
+                    &*DiagOpts),
+        DiagnosticPrinter(llvm::outs(), &*DiagOpts),
+        Files((FileSystemOptions())),
+        Sources(Diagnostics, Files),
+        Rewrite(Sources, Options) {
     Diagnostics.setClient(&DiagnosticPrinter, false);
-    // FIXME: To make these tests truly in-memory, we need to overlay the
-    // builtin headers.
-    OverlayFileSystem->pushOverlay(InMemoryFileSystem);
   }
 
   ~RewriterTestContext() {}
@@ -55,9 +50,9 @@ class RewriterTestContext {
   FileID createInMemoryFile(StringRef Name, StringRef Content) {
     std::unique_ptr<llvm::MemoryBuffer> Source =
         llvm::MemoryBuffer::getMemBuffer(Content);
-    InMemoryFileSystem->addFile(Name, 0, std::move(Source));
-
-    const FileEntry *Entry = Files.getFile(Name);
+    const FileEntry *Entry =
+      Files.getVirtualFile(Name, Source->getBufferSize(), 0);
+    Sources.overrideFileContents(Entry, std::move(Source));
     assert(Entry != nullptr);
     return Sources.createFileID(Entry, SourceLocation(), SrcMgr::C_User);
   }
@@ -114,8 +109,6 @@ class RewriterTestContext {
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts;
   DiagnosticsEngine Diagnostics;
   TextDiagnosticPrinter DiagnosticPrinter;
-  IntrusiveRefCntPtr<vfs::InMemoryFileSystem> InMemoryFileSystem;
-  IntrusiveRefCntPtr<vfs::OverlayFileSystem> OverlayFileSystem;
   FileManager Files;
   SourceManager Sources;
   LangOptions Options;

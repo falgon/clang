@@ -42,7 +42,7 @@ bool MigrationPass::CFBridgingFunctionsDefined() {
 
 bool trans::canApplyWeak(ASTContext &Ctx, QualType type,
                          bool AllowOnUnknownClass) {
-  if (!Ctx.getLangOpts().ObjCWeakRuntime)
+  if (!Ctx.getLangOpts().ObjCARCWeak)
     return false;
 
   QualType T = type;
@@ -50,8 +50,7 @@ bool trans::canApplyWeak(ASTContext &Ctx, QualType type,
     return false;
 
   // iOS is always safe to use 'weak'.
-  if (Ctx.getTargetInfo().getTriple().isiOS() ||
-      Ctx.getTargetInfo().getTriple().isWatchOS())
+  if (Ctx.getTargetInfo().getTriple().isiOS())
     AllowOnUnknownClass = true;
 
   while (const PointerType *ptr = T->getAs<PointerType>())
@@ -113,7 +112,10 @@ bool trans::isPlusOne(const Expr *E) {
   while (implCE && implCE->getCastKind() ==  CK_BitCast)
     implCE = dyn_cast<ImplicitCastExpr>(implCE->getSubExpr());
 
-  return implCE && implCE->getCastKind() == CK_ARCConsumeObject;
+  if (implCE && implCE->getCastKind() == CK_ARCConsumeObject)
+    return true;
+
+  return false;
 }
 
 /// \brief 'Loc' is the end of a statement range. This returns the location
@@ -270,7 +272,14 @@ public:
     mark(S->getElse());
     return true;
   }
-  
+
+  //@@
+  bool VisitExecuteStmt(ExecuteStmt *S) {
+    mark(S->getStmt());
+    return true;
+  }
+  //@@
+
   bool VisitWhileStmt(WhileStmt *S) {
     mark(S->getBody());
     return true;

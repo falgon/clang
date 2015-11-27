@@ -15,7 +15,6 @@ add_clang_library(clangSerialization
   GeneratePCH.cpp
   GlobalModuleIndex.cpp
   Module.cpp
-  ModuleFileExtension.cpp
   ModuleManager.cpp
 
   ADDITIONAL_HEADERS

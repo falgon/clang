@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -fblocks -fobjc-arc -fobjc-runtime-has-weak -triple x86_64-apple-darwin -print-ivar-layout -emit-llvm -o /dev/null %s > %t-64.layout
-// RUN: FileCheck -check-prefix=CHECK -check-prefix=CHECK-64 --input-file=%t-64.layout %s
+// RUN: FileCheck --input-file=%t-64.layout %s
 // RUN: %clang_cc1 -fblocks -fobjc-arc -fobjc-runtime-has-weak -triple i386-apple-darwin -print-ivar-layout -emit-llvm -o /dev/null  %s > %t-32.layout
-// RUN: FileCheck -check-prefix=CHECK -check-prefix=CHECK-32 --input-file=%t-32.layout %s
+// RUN: FileCheck -check-prefix=CHECK-i386 --input-file=%t-32.layout %s
 // rdar://12184410
 
 void x(id y) {}
@@ -17,19 +17,22 @@ void f() {
     __block id byref_bab = (id)0;
     __block id bl_var1;
 
-// CHECK: Inline block variable layout: 0x0100, BL_STRONG:1, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x0100
+// CHECK-i386: Inline instruction for block variable layout: 0x0100
     void (^b)() = ^{
         x(bar);
     };    
 
-// CHECK: Inline block variable layout: 0x0210, BL_STRONG:2, BL_BYREF:1, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x0210
+// CHECK-i386: Inline instruction for block variable layout: 0x0210
     void (^c)() = ^{
         x(bar);
         x(baz);
         byref_int = 1;
     };    
 
-// CHECK: Inline block variable layout: 0x0230, BL_STRONG:2, BL_BYREF:3, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x0230
+// CHECK-i386: Inline instruction for block variable layout: 0x0230
     void (^d)() = ^{
         x(bar);
         x(baz);
@@ -38,7 +41,8 @@ void f() {
         byref_bab = 0;
     };
 
-// CHECK: Inline block variable layout: 0x0231, BL_STRONG:2, BL_BYREF:3, BL_WEAK:1, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x0231
+// CHECK-i386: Inline instruction for block variable layout: 0x0231
     __weak id wid;
     id (^e)() = ^{
         x(bar);
@@ -49,7 +53,8 @@ void f() {
         return wid;
     };
 
-// CHECK: Inline block variable layout: 0x0235, BL_STRONG:2, BL_BYREF:3, BL_WEAK:5, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x0235
+// CHECK-i386: Inline instruction for block variable layout: 0x0235
     __weak id wid1, wid2, wid3, wid4;
     id (^f)() = ^{
         x(bar);
@@ -64,7 +69,8 @@ void f() {
         return wid;
     };
 
-// CHECK: Inline block variable layout: 0x035, BL_BYREF:3, BL_WEAK:5, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x035
+// CHECK-i386: Inline instruction for block variable layout: 0x035
     id (^g)() = ^{
         byref_int = 1;
         bl_var1 = 0;
@@ -76,18 +82,21 @@ void f() {
         return wid;
     };
 
-// CHECK: Inline block variable layout: 0x01, BL_WEAK:1, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x01
+// CHECK-i386: Inline instruction for block variable layout: 0x01
     id (^h)() = ^{
         return wid;
     };
 
-// CHECK: Inline block variable layout: 0x020, BL_BYREF:2, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x020
+// CHECK-i386: Inline instruction for block variable layout: 0x020
     void (^ii)() = ^{
        byref_int = 1;
        byref_bab = 0;
     };
 
-// CHECK: Inline block variable layout: 0x0102, BL_STRONG:1, BL_WEAK:2, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x0102
+// CHECK-i386: Inline instruction for block variable layout: 0x0102
     void (^jj)() = ^{
       x(bar);
       x(wid1);
@@ -105,7 +114,8 @@ int main() {
         __weak NSString *w1 = 0;
 
 
-// CHECK: Inline block variable layout: 0x0201, BL_STRONG:2, BL_WEAK:1, BL_OPERATOR:0
+// CHECK: Inline instruction for block variable layout: 0x0201
+// CHECK-i386: Inline instruction for block variable layout: 0x0201
         dispatch_block_t block2 = ^{
                 NSLog(@"%@, %@, %@", s1, w1, s2);
         };

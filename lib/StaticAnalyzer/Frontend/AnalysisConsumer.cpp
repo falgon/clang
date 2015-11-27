@@ -14,7 +14,7 @@
 #include "clang/StaticAnalyzer/Frontend/AnalysisConsumer.h"
 #include "ModelInjector.h"
 #include "clang/AST/ASTConsumer.h"
-#include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/AST/DataRecursiveASTVisitor.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/DeclObjC.h"
@@ -141,7 +141,7 @@ public:
 namespace {
 
 class AnalysisConsumer : public AnalysisASTConsumer,
-                         public RecursiveASTVisitor<AnalysisConsumer> {
+                         public DataRecursiveASTVisitor<AnalysisConsumer> {
   enum {
     AM_None = 0,
     AM_Syntax = 0x1,
@@ -168,7 +168,7 @@ public:
   /// The local declaration to all declarations ratio might be very small when
   /// working with a PCH file.
   SetOfDecls LocalTUDecls;
-
+                           
   // Set of PathDiagnosticConsumers.  Owned by AnalysisManager.
   PathDiagnosticConsumers PathConsumers;
 
@@ -364,15 +364,11 @@ public:
     }
     return true;
   }
-
+  
   bool VisitBlockDecl(BlockDecl *BD) {
     if (BD->hasBody()) {
       assert(RecVisitorMode == AM_Syntax || Mgr->shouldInlineCall() == false);
-      // Since we skip function template definitions, we should skip blocks
-      // declared in those functions as well.
-      if (!BD->isDependentContext()) {
-        HandleCode(BD, RecVisitorMode);
-      }
+      HandleCode(BD, RecVisitorMode);
     }
     return true;
   }
@@ -479,7 +475,7 @@ void AnalysisConsumer::HandleDeclsCallGraph(const unsigned LocalTUDeclsSize) {
 
     CallGraphNode *N = *I;
     Decl *D = N->getDecl();
-
+    
     // Skip the abstract root node.
     if (!D)
       continue;
@@ -683,11 +679,11 @@ void AnalysisConsumer::RunPathSensitiveChecks(Decl *D,
   case LangOptions::NonGC:
     ActionExprEngine(D, false, IMode, Visited);
     break;
-
+  
   case LangOptions::GCOnly:
     ActionExprEngine(D, true, IMode, Visited);
     break;
-
+  
   case LangOptions::HybridGC:
     ActionExprEngine(D, false, IMode, Visited);
     ActionExprEngine(D, true, IMode, Visited);
@@ -782,9 +778,8 @@ void UbigraphViz::AddEdge(ExplodedNode *Src, ExplodedNode *Dst) {
        << ", ('arrow','true'), ('oriented', 'true'))\n";
 }
 
-UbigraphViz::UbigraphViz(std::unique_ptr<raw_ostream> OutStream,
-                         StringRef Filename)
-    : Out(std::move(OutStream)), Filename(Filename), Cntr(0) {
+UbigraphViz::UbigraphViz(std::unique_ptr<raw_ostream> Out, StringRef Filename)
+    : Out(std::move(Out)), Filename(Filename), Cntr(0) {
 
   *Out << "('vertex_style_attribute', 0, ('shape', 'icosahedron'))\n";
   *Out << "('vertex_style', 1, 0, ('shape', 'sphere'), ('color', '#ffcc66'),"

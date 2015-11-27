@@ -5,7 +5,7 @@
 
 // With PCH
 // RUN: %clang_cc1 %s -emit-pch -o %t
-// RUN: %clang_cc1 -emit-llvm-only -verify %s -include-pch %t -debug-info-kind=limited
+// RUN: %clang_cc1 -emit-llvm-only -verify %s -include-pch %t -g
 
 // expected-no-diagnostics
 

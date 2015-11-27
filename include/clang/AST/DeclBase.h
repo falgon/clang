@@ -995,6 +995,7 @@ public:
              bool PrintInstantiation = false) const;
   void print(raw_ostream &Out, const PrintingPolicy &Policy,
              unsigned Indentation = 0, bool PrintInstantiation = false) const;
+  bool needsTrailingSemi() const;
   static void printGroup(Decl** Begin, unsigned NumDecls,
                          raw_ostream &Out, const PrintingPolicy &Policy,
                          unsigned Indentation = 0);
@@ -1142,10 +1143,11 @@ class DeclContext {
   /// that are missing from the lookup table.
   mutable bool HasLazyExternalLexicalLookups : 1;
 
-  /// \brief If \c true, lookups should only return identifier from
-  /// DeclContext scope (for example TranslationUnit). Used in
-  /// LookupQualifiedName()
-  mutable bool UseQualifiedLookup : 1;
+//@@
+  /// \brief If \c true, we should allow unresolved ids as they may refer
+  /// to entities introduced by some inline directive.
+  mutable bool AllowUnresolvedIds : 1;
+//@@
 
   /// \brief Pointer to the data structure used to lookup declarations
   /// within this context (or a DependentStoredDeclsMap if this is a
@@ -1181,7 +1183,9 @@ protected:
         ExternalVisibleStorage(false),
         NeedToReconcileExternalVisibleStorage(false),
         HasLazyLocalLexicalLookups(false), HasLazyExternalLexicalLookups(false),
-        UseQualifiedLookup(false),
+//@@
+        AllowUnresolvedIds(false),
+//@@
         LookupPtr(nullptr), FirstDecl(nullptr), LastDecl(nullptr) {}
 
 public:
@@ -1226,6 +1230,11 @@ public:
     return cast<Decl>(this)->getASTContext();
   }
 
+//@@
+  bool allowUnresolvedIds() const;
+  void setAllowUnresolvedIds(bool val = true) { AllowUnresolvedIds = val; }
+//@@
+
   bool isClosure() const {
     return DeclKind == Decl::Block;
   }
@@ -1259,7 +1268,10 @@ public:
   }
 
   bool isFileContext() const {
-    return DeclKind == Decl::TranslationUnit || DeclKind == Decl::Namespace;
+    return DeclKind == Decl::TranslationUnit || DeclKind == Decl::Namespace ||
+//@@
+		   DeclKind == Decl::Def || DeclKind == Decl::Execute || DeclKind == Decl::QuasiQuotes;
+//@@
   }
 
   bool isTranslationUnit() const {
@@ -1762,19 +1774,13 @@ public:
                  D == LastDecl);
   }
 
-  bool setUseQualifiedLookup(bool use = true) {
-    bool old_value = UseQualifiedLookup;
-    UseQualifiedLookup = use;
-    return old_value;
-  }
-
-  bool shouldUseQualifiedLookup() const {
-    return UseQualifiedLookup;
-  }
-
   static bool classof(const Decl *D);
   static bool classof(const DeclContext *D) { return true; }
 
+//@@
+  void printDeclContext(raw_ostream &Out, const PrintingPolicy &Policy,
+             unsigned Indentation = 0, bool PrintInstantiation = false) const;
+//@@
   void dumpDeclContext() const;
   void dumpLookups() const;
   void dumpLookups(llvm::raw_ostream &OS, bool DumpDecls = false) const;

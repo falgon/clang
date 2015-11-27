@@ -79,9 +79,3 @@ class PreDeclared;
 int myoperation(float f) {
   return (int) f;
 }
-
-template <typename T>
-class B {
-  template <typename U>
-  friend B<U>() {} // expected-error {{must use a qualified name when declaring a constructor as a friend}}
-};

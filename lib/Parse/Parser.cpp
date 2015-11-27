@@ -43,13 +43,20 @@ public:
 /// TemplateIdAnnotation pointers and clear the vector.
 class DestroyTemplateIdAnnotationsRAIIObj {
   SmallVectorImpl<TemplateIdAnnotation *> &Container;
-
+//@@
+  bool ShouldDestroy;
+//@@
 public:
   DestroyTemplateIdAnnotationsRAIIObj(
-      SmallVectorImpl<TemplateIdAnnotation *> &Container)
-      : Container(Container) {}
+      SmallVectorImpl<TemplateIdAnnotation *> &Container
+      /*@@*/, bool ShouldDestroy = true/*@@*/)
+      : Container(Container) /*@@*/, ShouldDestroy(ShouldDestroy)/*@@*/ {}
 
   ~DestroyTemplateIdAnnotationsRAIIObj() {
+//@@
+    if (!ShouldDestroy)
+      return;
+//@@
     for (SmallVectorImpl<TemplateIdAnnotation *>::iterator I =
              Container.begin(),
                                                            E = Container.end();
@@ -282,7 +289,6 @@ bool Parser::SkipUntil(ArrayRef<tok::TokenKind> Toks, SkipUntilFlags Flags) {
       // Ran out of tokens.
       return false;
 
-    case tok::annot_pragma_openmp:
     case tok::annot_pragma_openmp_end:
       // Stop before an OpenMP pragma boundary.
     case tok::annot_module_begin:
@@ -444,7 +450,12 @@ Parser::~Parser() {
     DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(TemplateIds);
   }
 
-  assert(TemplateIds.empty() && "Still alive TemplateIdAnnotations around?");
+//@@
+  if (!TemplateIds.empty()) {
+    DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(TemplateIds);
+  }
+  //@@was:assert(TemplateIds.empty() && "Still alive TemplateIdAnnotations around?");
+//@@
 }
 
 /// Initialize - Warm up the parser.
@@ -619,8 +630,9 @@ bool Parser::ParseTopLevelDecl(DeclGroupPtrTy &Result) {
 /// [C++0x/GNU] 'extern' 'template' declaration
 Parser::DeclGroupPtrTy
 Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
-                                 ParsingDeclSpec *DS) {
-  DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(TemplateIds);
+                                 ParsingDeclSpec *DS
+								 /*@@*/, bool destroyTemplateIds/*@@*/) {
+  DestroyTemplateIdAnnotationsRAIIObj CleanupRAII(TemplateIds/*@@*/, destroyTemplateIds/*@@*/);
   ParenBraceBracketBalancer BalancerRAIIObj(*this);
 
   if (PP.isCodeCompletionReached()) {
@@ -794,7 +806,41 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
   case tok::kw___if_not_exists:
     ParseMicrosoftIfExistsExternalDeclaration();
     return DeclGroupPtrTy();
-      
+
+//@@
+  case tok::hash:
+	SingleDecl = ParsePreprocessorDirectiveDecl();
+    break;
+
+  case tok::periodat: {
+	ParseScope Scope(this, Scope::DeclScope);
+    DefDecl* D = Actions.ActOnStartDefDecl(ConsumeToken());
+    ParseExternalDeclaration(attrs);
+	SingleDecl = Actions.ActOnEndDefDecl(D, PrevTokLocation);
+  }
+  break;
+
+  case tok::periodamp: {
+	ParseScope Scope(this, Scope::DeclScope);
+	ExecuteDecl* D = Actions.ActOnStartExecuteDecl(ConsumeToken());
+	StmtResult Res = ParseStatement();
+    if (Res.isInvalid()) {
+      D->setInvalidDecl();
+      return DeclGroupPtrTy();
+    }
+	SingleDecl = Actions.ActOnEndExecuteDecl(D, Res.get(), PrevTokLocation);
+  }
+  break;
+
+  case tok::periodexclaim:
+  case tok::periodtilde: {
+	TentativeParsingAction TPA(*this);
+	bool isDecl = IsMetaGeneratedDecl();
+	TPA.Revert();
+	if (isDecl)
+      return ParseMetaGeneratedDecl();
+  } //fallback
+//@@
   default:
   dont_know:
     // We can't tell whether this is a function-definition or declaration yet.
@@ -805,6 +851,29 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
   // single decl, convert it now.
   return Actions.ConvertDeclToDeclGroup(SingleDecl);
 }
+
+//@@
+Parser::DeclGroupPtrTy
+Parser::ParseMetaGeneratedDecl() {
+  assert(Tok.isOneOf(tok::periodtilde, tok::periodexclaim) &&
+	  "Not a meta-generated declaration");
+  tok::TokenKind SavedKind = Tok.getKind();
+  SourceLocation StartLoc = Tok.getLocation();
+  ExprResult Res = ParseMetaGeneratedInnerExpr();
+  SourceLocation EndLoc;
+  if (!Res.isInvalid()) {
+    if (TryConsumeToken(tok::semi, EndLoc))
+	  return Actions.ConvertDeclToDeclGroup(Actions.ActOnMetaGeneratedDecl(
+        StartLoc, EndLoc, SavedKind, Res.get()));
+	else
+      Diag(Tok, diag::err_expected_after) << "meta-generated declaration" <<
+		tok::semi;
+  }
+  else
+    SkipUntil(tok::semi);
+  return DeclGroupPtrTy();
+}
+//@@
 
 /// \brief Determine whether the current token, if it occurs after a
 /// declarator, continues a declaration or declaration list.
@@ -1094,16 +1163,14 @@ Decl *Parser::ParseFunctionDefinition(ParsingDeclarator &D,
     SourceLocation KWLoc;
     if (TryConsumeToken(tok::kw_delete, KWLoc)) {
       Diag(KWLoc, getLangOpts().CPlusPlus11
-                      ? diag::warn_cxx98_compat_defaulted_deleted_function
-                      : diag::ext_defaulted_deleted_function)
-        << 1 /* deleted */;
+                      ? diag::warn_cxx98_compat_deleted_function
+                      : diag::ext_deleted_function);
       Actions.SetDeclDeleted(Res, KWLoc);
       Delete = true;
     } else if (TryConsumeToken(tok::kw_default, KWLoc)) {
       Diag(KWLoc, getLangOpts().CPlusPlus11
-                      ? diag::warn_cxx98_compat_defaulted_deleted_function
-                      : diag::ext_defaulted_deleted_function)
-        << 0 /* defaulted */;
+                      ? diag::warn_cxx98_compat_defaulted_function
+                      : diag::ext_defaulted_function);
       Actions.SetDeclDefaulted(Res, KWLoc);
     } else {
       llvm_unreachable("function definition after = not 'delete' or 'default'");
@@ -1553,7 +1620,7 @@ bool Parser::TryKeywordIdentFallback(bool DisableKeyword) {
 /// Note that this routine emits an error if you call it with ::new or ::delete
 /// as the current tokens, so only call it in contexts where these are invalid.
 bool Parser::TryAnnotateTypeOrScopeToken(bool EnteringContext, bool NeedType) {
-  assert((Tok.is(tok::identifier) || Tok.is(tok::coloncolon) ||
+  assert((Tok.isIdentifier(/*@@was:tok::identifier*/) || Tok.is(tok::coloncolon) ||
           Tok.is(tok::kw_typename) || Tok.is(tok::annot_cxxscope) ||
           Tok.is(tok::kw_decltype) || Tok.is(tok::annot_template_id) ||
           Tok.is(tok::kw___super)) &&
@@ -1589,8 +1656,9 @@ bool Parser::TryAnnotateTypeOrScopeToken(bool EnteringContext, bool NeedType) {
                                        /*EnteringContext=*/false,
                                        nullptr, /*IsTypename*/ true))
       return true;
-    if (!SS.isSet()) {
-      if (Tok.is(tok::identifier) || Tok.is(tok::annot_template_id) ||
+    if (!SS.isSet() /*@@*/ && !Actions.CurContext->allowUnresolvedIds() &&
+        Tok.isNot(tok::periodexclaim)/*@@*/) {
+      if (Tok.isIdentifier(/*@@was:tok::identifier*/) || Tok.is(tok::annot_template_id) ||
           Tok.is(tok::annot_decltype)) {
         // Attempt to recover by skipping the invalid 'typename'
         if (Tok.is(tok::annot_decltype) ||
@@ -1610,12 +1678,35 @@ bool Parser::TryAnnotateTypeOrScopeToken(bool EnteringContext, bool NeedType) {
       return true;
     }
 
+//@@
+    Token SavedTok = Tok;
+//@@
     TypeResult Ty;
-    if (Tok.is(tok::identifier)) {
+    if (Tok.isIdentifier(/*@@was:tok::identifier*/)) {
+//@@
+      SourceLocation Loc;
+      IdentifierInfo *II;
+	  if (Tok.is(tok::identifier)) {
+        II = Tok.getIdentifierInfo();
+        Loc = Tok.getLocation();
+      }
+      else if ((II = ParseMetaGeneratedIdentifier(&Loc))) {
+        //push back the token to be annotated
+        if (PP.isBacktrackEnabled())
+          PP.RevertCachedTokens(1);
+        else
+          PP.EnterToken(Tok);
+      }
+      else {
+        Diag(Tok, diag::err_expected_type_name_after_typename)
+          << SS.getRange();
+        return true;
+      }
+
+//@@
       // FIXME: check whether the next token is '<', first!
-      Ty = Actions.ActOnTypenameType(getCurScope(), TypenameLoc, SS, 
-                                     *Tok.getIdentifierInfo(),
-                                     Tok.getLocation());
+      Ty = Actions.ActOnTypenameType(getCurScope(), TypenameLoc, SS, *II, Loc);
+                         //@@was: *Tok.getIdentifierInfo(), Tok.getLocation());
     } else if (Tok.is(tok::annot_template_id)) {
       TemplateIdAnnotation *TemplateId = takeTemplateIdAnnotation(Tok);
       if (TemplateId->Kind != TNK_Type_template &&
@@ -1646,6 +1737,10 @@ bool Parser::TryAnnotateTypeOrScopeToken(bool EnteringContext, bool NeedType) {
     setTypeAnnotation(Tok, Ty.isInvalid() ? ParsedType() : Ty.get());
     Tok.setAnnotationEndLoc(EndLoc);
     Tok.setLocation(TypenameLoc);
+//@@
+    if (SavedTok.is(tok::identifier))
+//@@ only annotate an identifier as it doesn't work well with the otherwise reinserted token
+//@@
     PP.AnnotateCachedTokens(Tok);
     return false;
   }
@@ -1757,7 +1852,11 @@ bool Parser::TryAnnotateTypeOrScopeTokenAfterScopeSpec(bool EnteringContext,
 
   if (Tok.is(tok::annot_template_id)) {
     TemplateIdAnnotation *TemplateId = takeTemplateIdAnnotation(Tok);
-    if (TemplateId->Kind == TNK_Type_template) {
+    if (TemplateId->Kind == TNK_Type_template
+//@@
+		|| TemplateId->Kind == TNK_Dependent_template_name 
+//@@
+    ) {
       // A template-id that refers to a type was parsed into a
       // template-id annotation in a context where we weren't allowed
       // to produce a type annotation token. Update the template-id
@@ -1784,7 +1883,7 @@ bool Parser::TryAnnotateTypeOrScopeTokenAfterScopeSpec(bool EnteringContext,
 bool Parser::TryAnnotateCXXScopeToken(bool EnteringContext) {
   assert(getLangOpts().CPlusPlus &&
          "Call sites of this function should be guarded by checking for C++");
-  assert((Tok.is(tok::identifier) || Tok.is(tok::coloncolon) ||
+  assert((Tok.isIdentifier() /*@@was:Tok.is(tok::identifier)*/ || Tok.is(tok::coloncolon) ||
           (Tok.is(tok::annot_template_id) && NextToken().is(tok::coloncolon)) ||
           Tok.is(tok::kw_decltype) || Tok.is(tok::kw___super)) &&
          "Cannot be a type or scope token!");
@@ -2021,37 +2120,6 @@ Parser::DeclGroupPtrTy Parser::ParseModuleImport(SourceLocation AtLoc) {
   return Actions.ConvertDeclToDeclGroup(Import.get());
 }
 
-/// \brief Try recover parser when module annotation appears where it must not
-/// be found.
-/// \returns false if the recover was successful and parsing may be continued, or
-/// true if parser must bail out to top level and handle the token there.
-bool Parser::parseMisplacedModuleImport() {
-  while (true) {
-    switch (Tok.getKind()) {
-    case tok::annot_module_end:
-      // Inform caller that recovery failed, the error must be handled at upper
-      // level.
-      return true;
-    case tok::annot_module_begin:
-      Actions.diagnoseMisplacedModuleImport(reinterpret_cast<Module *>(
-        Tok.getAnnotationValue()), Tok.getLocation());
-      return true;
-    case tok::annot_module_include:
-      // Module import found where it should not be, for instance, inside a
-      // namespace. Recover by importing the module.
-      Actions.ActOnModuleInclude(Tok.getLocation(),
-                                 reinterpret_cast<Module *>(
-                                 Tok.getAnnotationValue()));
-      ConsumeToken();
-      // If there is another module import, process it.
-      continue;
-    default:
-      return false;
-    }
-  }
-  return false;
-}
-
 bool BalancedDelimiterTracker::diagnoseOverflow() {
   P.Diag(P.Tok, diag::err_bracket_depth_exceeded)
     << P.getLangOpts().BracketDepth;
@@ -2079,10 +2147,7 @@ bool BalancedDelimiterTracker::expectAndConsume(unsigned DiagID,
 bool BalancedDelimiterTracker::diagnoseMissingClose() {
   assert(!P.Tok.is(Close) && "Should have consumed closing delimiter");
 
-  if (P.Tok.is(tok::annot_module_end))
-    P.Diag(P.Tok, diag::err_missing_before_module_end) << Close;
-  else
-    P.Diag(P.Tok, diag::err_expected) << Close;
+  P.Diag(P.Tok, diag::err_expected) << Close;
   P.Diag(LOpen, diag::note_matching) << Kind;
 
   // If we're not already at some kind of closing bracket, skip to our closing

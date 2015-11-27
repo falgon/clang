@@ -17,7 +17,6 @@
 #define LLVM_CLANG_CODEGEN_CGFUNCTIONINFO_H
 
 #include "clang/AST/CanonicalType.h"
-#include "clang/AST/CharUnits.h"
 #include "clang/AST/Type.h"
 #include "llvm/ADT/FoldingSet.h"
 #include <cassert>
@@ -127,7 +126,7 @@ public:
   static ABIArgInfo getIgnore() {
     return ABIArgInfo(Ignore);
   }
-  static ABIArgInfo getIndirect(CharUnits Alignment, bool ByVal = true,
+  static ABIArgInfo getIndirect(unsigned Alignment, bool ByVal = true,
                                 bool Realign = false,
                                 llvm::Type *Padding = nullptr) {
     auto AI = ABIArgInfo(Indirect);
@@ -138,7 +137,7 @@ public:
     AI.setPaddingType(Padding);
     return AI;
   }
-  static ABIArgInfo getIndirectInReg(CharUnits Alignment, bool ByVal = true,
+  static ABIArgInfo getIndirectInReg(unsigned Alignment, bool ByVal = true,
                                      bool Realign = false) {
     auto AI = getIndirect(Alignment, ByVal, Realign);
     AI.setInReg(true);
@@ -212,20 +211,20 @@ public:
   }
 
   // Indirect accessors
-  CharUnits getIndirectAlign() const {
+  unsigned getIndirectAlign() const {
     assert(isIndirect() && "Invalid kind!");
-    return CharUnits::fromQuantity(IndirectAlign);
+    return IndirectAlign;
   }
-  void setIndirectAlign(CharUnits IA) {
+  void setIndirectAlign(unsigned IA) {
     assert(isIndirect() && "Invalid kind!");
-    IndirectAlign = IA.getQuantity();
+    IndirectAlign = IA;
   }
 
   bool getIndirectByVal() const {
     assert(isIndirect() && "Invalid kind!");
     return IndirectByVal;
   }
-  void setIndirectByVal(bool IBV) {
+  void setIndirectByVal(unsigned IBV) {
     assert(isIndirect() && "Invalid kind!");
     IndirectByVal = IBV;
   }
@@ -371,7 +370,6 @@ class CGFunctionInfo : public llvm::FoldingSetNode {
   /// The struct representing all arguments passed in memory.  Only used when
   /// passing non-trivial types with inalloca.  Not part of the profile.
   llvm::StructType *ArgStruct;
-  unsigned ArgStructAlign;
 
   unsigned NumArgs;
   ArgInfo *getArgsBuffer() {
@@ -465,13 +463,7 @@ public:
 
   /// \brief Get the struct type used to represent all the arguments in memory.
   llvm::StructType *getArgStruct() const { return ArgStruct; }
-  CharUnits getArgStructAlignment() const {
-    return CharUnits::fromQuantity(ArgStructAlign);
-  }
-  void setArgStruct(llvm::StructType *Ty, CharUnits Align) {
-    ArgStruct = Ty;
-    ArgStructAlign = Align.getQuantity();
-  }
+  void setArgStruct(llvm::StructType *Ty) { ArgStruct = Ty; }
 
   void Profile(llvm::FoldingSetNodeID &ID) {
     ID.AddInteger(getASTCallingConvention());
@@ -507,29 +499,6 @@ public:
       i->Profile(ID);
     }
   }
-};
-
-/// CGCalleeInfo - Class to encapsulate the information about a callee to be
-/// used during the generation of call/invoke instructions.
-class CGCalleeInfo {
-  /// \brief The function proto type of the callee.
-  const FunctionProtoType *CalleeProtoTy;
-  /// \brief The function declaration of the callee.
-  const Decl *CalleeDecl;
-
-public:
-  explicit CGCalleeInfo() : CalleeProtoTy(nullptr), CalleeDecl(nullptr) {}
-  CGCalleeInfo(const FunctionProtoType *calleeProtoTy, const Decl *calleeDecl)
-      : CalleeProtoTy(calleeProtoTy), CalleeDecl(calleeDecl) {}
-  CGCalleeInfo(const FunctionProtoType *calleeProtoTy)
-      : CalleeProtoTy(calleeProtoTy), CalleeDecl(nullptr) {}
-  CGCalleeInfo(const Decl *calleeDecl)
-      : CalleeProtoTy(nullptr), CalleeDecl(calleeDecl) {}
-
-  const FunctionProtoType *getCalleeFunctionProtoType() {
-    return CalleeProtoTy;
-  }
-  const Decl *getCalleeDecl() { return CalleeDecl; }
 };
 
 }  // end namespace CodeGen

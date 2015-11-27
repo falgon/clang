@@ -38,6 +38,10 @@ void Scope::Init(Scope *parent, unsigned flags) {
     FnParent       = parent->FnParent;
     BlockParent    = parent->BlockParent;
     TemplateParamParent = parent->TemplateParamParent;
+//@@
+    QuasiQuotesParent = parent->QuasiQuotesParent;
+    EscapeParent = parent->EscapeParent;
+//@@
     MSLastManglingParent = parent->MSLastManglingParent;
     MSCurManglingNumber = getMSLastManglingNumber();
     if ((Flags & (FnScope | ClassScope | BlockScope | TemplateParamScope |
@@ -50,6 +54,10 @@ void Scope::Init(Scope *parent, unsigned flags) {
     PrototypeIndex = 0;
     MSLastManglingParent = FnParent = BlockParent = nullptr;
     TemplateParamParent = nullptr;
+//@@
+    QuasiQuotesParent = nullptr;
+    EscapeParent = nullptr;
+//@@
     MSLastManglingNumber = 1;
     MSCurManglingNumber = 1;
   }
@@ -67,6 +75,10 @@ void Scope::Init(Scope *parent, unsigned flags) {
   if (flags & ContinueScope)      ContinueParent = this;
   if (flags & BlockScope)         BlockParent = this;
   if (flags & TemplateParamScope) TemplateParamParent = this;
+//@@
+  if (flags & QuasiQuotesScope)   QuasiQuotesParent = this;
+  if (flags & EscapeScope)   EscapeParent = this;
+//@@
 
   // If this is a prototype scope, record that.
   if (flags & FunctionPrototypeScope) PrototypeDepth++;

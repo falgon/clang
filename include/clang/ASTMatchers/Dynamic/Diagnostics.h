@@ -104,11 +104,11 @@ public:
     /// \brief About to call the constructor for a matcher.
     enum ConstructMatcherEnum { ConstructMatcher };
     Context(ConstructMatcherEnum, Diagnostics *Error, StringRef MatcherName,
-            SourceRange MatcherRange);
+            const SourceRange &MatcherRange);
     /// \brief About to recurse into parsing one argument for a matcher.
     enum MatcherArgEnum { MatcherArg };
     Context(MatcherArgEnum, Diagnostics *Error, StringRef MatcherName,
-            SourceRange MatcherRange, unsigned ArgNumber);
+            const SourceRange &MatcherRange, unsigned ArgNumber);
     ~Context();
 
   private:
@@ -137,7 +137,7 @@ public:
   /// All the context information will be kept on the error message.
   /// \return a helper class to allow the caller to pass the arguments for the
   /// error message, using the << operator.
-  ArgStream addError(SourceRange Range, ErrorType Error);
+  ArgStream addError(const SourceRange &Range, ErrorType Error);
 
   /// \brief Information stored for one frame of the context.
   struct ContextFrame {

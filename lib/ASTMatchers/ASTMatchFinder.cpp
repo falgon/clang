@@ -197,6 +197,9 @@ public:
 
   bool shouldVisitTemplateInstantiations() const { return true; }
   bool shouldVisitImplicitCode() const { return true; }
+  // Disables data recursion. We intercept Traverse* methods in the RAV, which
+  // are not triggered during data recursion.
+  bool shouldUseDataRecursionFor(clang::Stmt *S) const { return false; }
 
 private:
   // Used for updating the depth during traversal.
@@ -484,6 +487,9 @@ public:
 
   bool shouldVisitTemplateInstantiations() const { return true; }
   bool shouldVisitImplicitCode() const { return true; }
+  // Disables data recursion. We intercept Traverse* methods in the RAV, which
+  // are not triggered during data recursion.
+  bool shouldUseDataRecursionFor(clang::Stmt *S) const { return false; }
 
 private:
   class TimeBucketRegion {
@@ -615,6 +621,9 @@ private:
     if (Node.get<TranslationUnitDecl>() ==
         ActiveASTContext->getTranslationUnitDecl())
       return false;
+    assert(Node.getMemoizationData() &&
+           "Invariant broken: only nodes that support memoization may be "
+           "used in the parent map.");
 
     MatchKey Key;
     Key.MatcherID = Matcher.getID();
@@ -858,11 +867,7 @@ bool MatchASTVisitor::TraverseNestedNameSpecifier(NestedNameSpecifier *NNS) {
 
 bool MatchASTVisitor::TraverseNestedNameSpecifierLoc(
     NestedNameSpecifierLoc NNS) {
-  if (!NNS)
-    return true;
-
   match(NNS);
-
   // We only match the nested name specifier here (as opposed to traversing it)
   // because the traversal is already done in the parallel "Loc"-hierarchy.
   if (NNS.hasQualifier())
@@ -908,37 +913,37 @@ MatchFinder::~MatchFinder() {}
 void MatchFinder::addMatcher(const DeclarationMatcher &NodeMatch,
                              MatchCallback *Action) {
   Matchers.DeclOrStmt.emplace_back(NodeMatch, Action);
-  Matchers.AllCallbacks.insert(Action);
+  Matchers.AllCallbacks.push_back(Action);
 }
 
 void MatchFinder::addMatcher(const TypeMatcher &NodeMatch,
                              MatchCallback *Action) {
   Matchers.Type.emplace_back(NodeMatch, Action);
-  Matchers.AllCallbacks.insert(Action);
+  Matchers.AllCallbacks.push_back(Action);
 }
 
 void MatchFinder::addMatcher(const StatementMatcher &NodeMatch,
                              MatchCallback *Action) {
   Matchers.DeclOrStmt.emplace_back(NodeMatch, Action);
-  Matchers.AllCallbacks.insert(Action);
+  Matchers.AllCallbacks.push_back(Action);
 }
 
 void MatchFinder::addMatcher(const NestedNameSpecifierMatcher &NodeMatch,
                              MatchCallback *Action) {
   Matchers.NestedNameSpecifier.emplace_back(NodeMatch, Action);
-  Matchers.AllCallbacks.insert(Action);
+  Matchers.AllCallbacks.push_back(Action);
 }
 
 void MatchFinder::addMatcher(const NestedNameSpecifierLocMatcher &NodeMatch,
                              MatchCallback *Action) {
   Matchers.NestedNameSpecifierLoc.emplace_back(NodeMatch, Action);
-  Matchers.AllCallbacks.insert(Action);
+  Matchers.AllCallbacks.push_back(Action);
 }
 
 void MatchFinder::addMatcher(const TypeLocMatcher &NodeMatch,
                              MatchCallback *Action) {
   Matchers.TypeLoc.emplace_back(NodeMatch, Action);
-  Matchers.AllCallbacks.insert(Action);
+  Matchers.AllCallbacks.push_back(Action);
 }
 
 bool MatchFinder::addDynamicMatcher(const internal::DynTypedMatcher &NodeMatch,

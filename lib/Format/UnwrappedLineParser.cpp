@@ -154,10 +154,12 @@ public:
   CompoundStatementIndenter(UnwrappedLineParser *Parser,
                             const FormatStyle &Style, unsigned &LineLevel)
       : LineLevel(LineLevel), OldLineLevel(LineLevel) {
-    if (Style.BraceWrapping.AfterControlStatement)
+    if (Style.BreakBeforeBraces == FormatStyle::BS_Allman) {
       Parser->addUnwrappedLine();
-    if (Style.BraceWrapping.IndentBraces)
+    } else if (Style.BreakBeforeBraces == FormatStyle::BS_GNU) {
+      Parser->addUnwrappedLine();
       ++LineLevel;
+    }
   }
   ~CompoundStatementIndenter() { LineLevel = OldLineLevel; }
 
@@ -454,15 +456,17 @@ static bool isGoogScope(const UnwrappedLine &Line) {
 
 static bool ShouldBreakBeforeBrace(const FormatStyle &Style,
                                    const FormatToken &InitialToken) {
-  if (InitialToken.is(tok::kw_namespace))
-    return Style.BraceWrapping.AfterNamespace;
-  if (InitialToken.is(tok::kw_class))
-    return Style.BraceWrapping.AfterClass;
-  if (InitialToken.is(tok::kw_union))
-    return Style.BraceWrapping.AfterUnion;
-  if (InitialToken.is(tok::kw_struct))
-    return Style.BraceWrapping.AfterStruct;
-  return false;
+  switch (Style.BreakBeforeBraces) {
+  case FormatStyle::BS_Linux:
+    return InitialToken.isOneOf(tok::kw_namespace, tok::kw_class);
+  case FormatStyle::BS_Mozilla:
+    return InitialToken.isOneOf(tok::kw_class, tok::kw_struct, tok::kw_union);
+  case FormatStyle::BS_Allman:
+  case FormatStyle::BS_GNU:
+    return true;
+  default:
+    return false;
+  }
 }
 
 void UnwrappedLineParser::parseChildBlock() {
@@ -677,7 +681,8 @@ void UnwrappedLineParser::parseStructuralElement() {
     case tok::objc_autoreleasepool:
       nextToken();
       if (FormatTok->Tok.is(tok::l_brace)) {
-        if (Style.BraceWrapping.AfterObjCDeclaration)
+        if (Style.BreakBeforeBraces == FormatStyle::BS_Allman ||
+            Style.BreakBeforeBraces == FormatStyle::BS_GNU)
           addUnwrappedLine();
         parseBlock(/*MustBeDeclaration=*/false);
       }
@@ -839,11 +844,6 @@ void UnwrappedLineParser::parseStructuralElement() {
       if (Style.Language == FormatStyle::LK_Java && FormatTok &&
           FormatTok->is(tok::kw_class))
         nextToken();
-      if (Style.Language == FormatStyle::LK_JavaScript && FormatTok &&
-          FormatTok->Tok.getIdentifierInfo())
-        // JavaScript only has pseudo keywords, all keywords are allowed to
-        // appear in "IdentifierName" positions. See http://es5.github.io/#x7.6
-        nextToken();
       break;
     case tok::semi:
       nextToken();
@@ -854,11 +854,6 @@ void UnwrappedLineParser::parseStructuralElement() {
       return;
     case tok::l_paren:
       parseParens();
-      break;
-    case tok::kw_operator:
-      nextToken();
-      if (FormatTok->isBinaryOperator())
-        nextToken();
       break;
     case tok::caret:
       nextToken();
@@ -876,7 +871,7 @@ void UnwrappedLineParser::parseStructuralElement() {
         // structural element.
         // FIXME: Figure out cases where this is not true, and add projections
         // for them (the one we know is missing are lambdas).
-        if (Style.BraceWrapping.AfterFunction)
+        if (Style.BreakBeforeBraces != FormatStyle::BS_Attach)
           addUnwrappedLine();
         FormatTok->Type = TT_FunctionLBrace;
         parseBlock(/*MustBeDeclaration=*/false);
@@ -1264,10 +1259,12 @@ void UnwrappedLineParser::parseIfThenElse() {
   if (FormatTok->Tok.is(tok::l_brace)) {
     CompoundStatementIndenter Indenter(this, Style, Line->Level);
     parseBlock(/*MustBeDeclaration=*/false);
-    if (Style.BraceWrapping.BeforeElse)
+    if (Style.BreakBeforeBraces == FormatStyle::BS_Allman ||
+        Style.BreakBeforeBraces == FormatStyle::BS_GNU) {
       addUnwrappedLine();
-    else
+    } else {
       NeedsUnwrappedLine = true;
+    }
   } else {
     addUnwrappedLine();
     ++Line->Level;
@@ -1275,6 +1272,8 @@ void UnwrappedLineParser::parseIfThenElse() {
     --Line->Level;
   }
   if (FormatTok->Tok.is(tok::kw_else)) {
+    if (Style.BreakBeforeBraces == FormatStyle::BS_Stroustrup)
+      addUnwrappedLine();
     nextToken();
     if (FormatTok->Tok.is(tok::l_brace)) {
       CompoundStatementIndenter Indenter(this, Style, Line->Level);
@@ -1315,7 +1314,9 @@ void UnwrappedLineParser::parseTryCatch() {
   if (FormatTok->is(tok::l_brace)) {
     CompoundStatementIndenter Indenter(this, Style, Line->Level);
     parseBlock(/*MustBeDeclaration=*/false);
-    if (Style.BraceWrapping.BeforeCatch) {
+    if (Style.BreakBeforeBraces == FormatStyle::BS_Allman ||
+        Style.BreakBeforeBraces == FormatStyle::BS_GNU ||
+        Style.BreakBeforeBraces == FormatStyle::BS_Stroustrup) {
       addUnwrappedLine();
     } else {
       NeedsUnwrappedLine = true;
@@ -1353,13 +1354,17 @@ void UnwrappedLineParser::parseTryCatch() {
     NeedsUnwrappedLine = false;
     CompoundStatementIndenter Indenter(this, Style, Line->Level);
     parseBlock(/*MustBeDeclaration=*/false);
-    if (Style.BraceWrapping.BeforeCatch)
+    if (Style.BreakBeforeBraces == FormatStyle::BS_Allman ||
+        Style.BreakBeforeBraces == FormatStyle::BS_GNU ||
+        Style.BreakBeforeBraces == FormatStyle::BS_Stroustrup) {
       addUnwrappedLine();
-    else
+    } else {
       NeedsUnwrappedLine = true;
+    }
   }
-  if (NeedsUnwrappedLine)
+  if (NeedsUnwrappedLine) {
     addUnwrappedLine();
+  }
 }
 
 void UnwrappedLineParser::parseNamespace() {
@@ -1367,7 +1372,7 @@ void UnwrappedLineParser::parseNamespace() {
 
   const FormatToken &InitialToken = *FormatTok;
   nextToken();
-  while (FormatTok->isOneOf(tok::identifier, tok::coloncolon))
+  if (FormatTok->Tok.is(tok::identifier))
     nextToken();
   if (FormatTok->Tok.is(tok::l_brace)) {
     if (ShouldBreakBeforeBrace(Style, InitialToken))
@@ -1435,7 +1440,7 @@ void UnwrappedLineParser::parseDoWhile() {
   if (FormatTok->Tok.is(tok::l_brace)) {
     CompoundStatementIndenter Indenter(this, Style, Line->Level);
     parseBlock(/*MustBeDeclaration=*/false);
-    if (Style.BraceWrapping.IndentBraces)
+    if (Style.BreakBeforeBraces == FormatStyle::BS_GNU)
       addUnwrappedLine();
   } else {
     addUnwrappedLine();
@@ -1463,8 +1468,11 @@ void UnwrappedLineParser::parseLabel() {
     CompoundStatementIndenter Indenter(this, Style, Line->Level);
     parseBlock(/*MustBeDeclaration=*/false);
     if (FormatTok->Tok.is(tok::kw_break)) {
-      if (Style.BraceWrapping.AfterControlStatement)
+      // "break;" after "}" on its own line only for BS_Allman and BS_GNU
+      if (Style.BreakBeforeBraces == FormatStyle::BS_Allman ||
+          Style.BreakBeforeBraces == FormatStyle::BS_GNU) {
         addUnwrappedLine();
+      }
       parseStructuralElement();
     }
     addUnwrappedLine();
@@ -1728,7 +1736,8 @@ void UnwrappedLineParser::parseObjCInterfaceOrImplementation() {
     parseObjCProtocolList();
 
   if (FormatTok->Tok.is(tok::l_brace)) {
-    if (Style.BraceWrapping.AfterObjCDeclaration)
+    if (Style.BreakBeforeBraces == FormatStyle::BS_Allman ||
+        Style.BreakBeforeBraces == FormatStyle::BS_GNU)
       addUnwrappedLine();
     parseBlock(/*MustBeDeclaration=*/true);
   }
@@ -1773,7 +1782,7 @@ void UnwrappedLineParser::parseJavaScriptEs6ImportExport() {
   }
 
   if (FormatTok->isOneOf(tok::kw_const, tok::kw_class, tok::kw_enum,
-                         Keywords.kw_let, Keywords.kw_var))
+                         Keywords.kw_var))
     return; // Fall through to parsing the corresponding structure.
 
   if (FormatTok->is(tok::l_brace)) {

@@ -162,10 +162,5 @@ TEST_F(FormatTestProto, FormatsService) {
                "};");
 }
 
-TEST_F(FormatTestProto, ExtendingMessage) {
-  verifyFormat("extend .foo.Bar {\n"
-               "}");
-}
-
 } // end namespace tooling
 } // end namespace clang

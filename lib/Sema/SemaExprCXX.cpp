@@ -300,6 +300,12 @@ ParsedType Sema::getDestructorName(SourceLocation TildeLoc,
     return ParsedType::make(T);
   }
 
+//@@
+//@@@
+  if (isCurrentClassName(&II, S))
+    return ActOnUnknownType(II, SourceLocation());
+//@@
+
   if (NonMatchingTypeDecl) {
     QualType T = Context.getTypeDeclType(NonMatchingTypeDecl);
     Diag(NameLoc, diag::err_destructor_expr_type_mismatch)
@@ -484,9 +490,12 @@ Sema::ActOnCXXTypeid(SourceLocation OpLoc, SourceLocation LParenLoc,
       return ExprError(Diag(OpLoc, diag::err_need_header_before_typeid));
   }
 
-  if (!getLangOpts().RTTI) {
-    return ExprError(Diag(OpLoc, diag::err_no_typeid_with_fno_rtti));
-  }
+//@@
+//@@was: @@@ this is just to allow staged code msvc headers under windows
+  //if (!getLangOpts().RTTI) {
+  //  return ExprError(Diag(OpLoc, diag::err_no_typeid_with_fno_rtti));
+  //}
+//@@
 
   QualType TypeInfoType = Context.getTypeDeclType(CXXTypeInfoDecl);
 
@@ -851,6 +860,10 @@ QualType Sema::getCurrentThisType() {
       // per [expr.prim.general]p4.
       return Context.getPointerType(ClassTy);
     }
+//@@
+    if (getCurQuasiQuotesDecl())
+      ThisTy = Context.DependentTy;
+//@@
   }
   return ThisTy;
 }
@@ -1031,11 +1044,6 @@ Sema::BuildCXXTypeConstructExpr(TypeSourceInfo *TInfo,
     return BuildCXXFunctionalCastExpr(TInfo, LParenLoc, Arg, RParenLoc);
   }
 
-  // C++14 [expr.type.conv]p2: The expression T(), where T is a
-  //   simple-type-specifier or typename-specifier for a non-array complete
-  //   object type or the (possibly cv-qualified) void type, creates a prvalue
-  //   of the specified type, whose value is that produced by value-initializing
-  //   an object of type T.
   QualType ElemTy = Ty;
   if (Ty->isArrayType()) {
     if (!ListInitialization)
@@ -1043,10 +1051,6 @@ Sema::BuildCXXTypeConstructExpr(TypeSourceInfo *TInfo,
                             diag::err_value_init_for_array_type) << FullRange);
     ElemTy = Context.getBaseElementType(Ty);
   }
-
-  if (!ListInitialization && Ty->isFunctionType())
-    return ExprError(Diag(TyBeginLoc, diag::err_value_init_for_function_type)
-                     << FullRange);
 
   if (!Ty->isVoidType() &&
       RequireCompleteType(TyBeginLoc, ElemTy,
@@ -2265,9 +2269,6 @@ FunctionDecl *Sema::FindUsualDeallocationFunction(SourceLocation StartLoc,
            "found an unexpected usual deallocation function");
   }
 
-  if (getLangOpts().CUDA && getLangOpts().CUDATargetOverloads)
-    EraseUnwantedCUDAMatches(dyn_cast<FunctionDecl>(CurContext), Matches);
-
   assert(Matches.size() == 1 &&
          "unexpectedly have multiple usual deallocation functions");
   return Matches.front();
@@ -2298,9 +2299,6 @@ bool Sema::FindDeallocationFunction(SourceLocation StartLoc, CXXRecordDecl *RD,
     if (cast<CXXMethodDecl>(ND)->isUsualDeallocationFunction())
       Matches.push_back(F.getPair());
   }
-
-  if (getLangOpts().CUDA && getLangOpts().CUDATargetOverloads)
-    EraseUnwantedCUDAMatches(dyn_cast<FunctionDecl>(CurContext), Matches);
 
   // There's exactly one suitable operator;  pick it.
   if (Matches.size() == 1) {
@@ -2500,10 +2498,8 @@ bool MismatchingNewDeleteDetector::hasMatchingNewInCtor(
 MismatchingNewDeleteDetector::MismatchResult
 MismatchingNewDeleteDetector::analyzeInClassInitializer() {
   assert(Field != nullptr && "This should be called only for members");
-  const Expr *InitExpr = Field->getInClassInitializer();
-  if (!InitExpr)
-    return EndOfTU ? NoMismatch : AnalyzeLater;
-  if (const CXXNewExpr *NE = getNewExprFromInitListOrExpr(InitExpr)) {
+  if (const CXXNewExpr *NE =
+          getNewExprFromInitListOrExpr(Field->getInClassInitializer())) {
     if (NE->isArray() != IsArrayForm) {
       NewExprs.push_back(NE);
       return MemberInitMismatches;
@@ -2727,7 +2723,7 @@ Sema::ActOnCXXDelete(SourceLocation StartLoc, bool UseGlobal,
     if (Pointee->isArrayType() && !ArrayForm) {
       Diag(StartLoc, diag::warn_delete_array_type)
           << Type << Ex.get()->getSourceRange()
-          << FixItHint::CreateInsertion(getLocForEndOfToken(StartLoc), "[]");
+          << FixItHint::CreateInsertion(PP.getLocForEndOfToken(StartLoc), "[]");
       ArrayForm = true;
     }
 
@@ -3447,7 +3443,6 @@ Sema::PerformImplicitConversion(Expr *From, QualType ToType,
   case ICK_Function_To_Pointer:
   case ICK_Qualification:
   case ICK_Num_Conversion_Kinds:
-  case ICK_C_Only_Conversion:
     llvm_unreachable("Improper second standard conversion");
   }
 
@@ -3550,42 +3545,26 @@ static bool CheckUnaryTypeTraitTypeCompleteness(Sema &S, TypeTrait UTT,
   case UTT_IsVolatile:
   case UTT_IsSigned:
   case UTT_IsUnsigned:
-
-  // This type trait always returns false, checking the type is moot.
-  case UTT_IsInterfaceClass:
     return true;
 
-  // C++14 [meta.unary.prop]:
-  //   If T is a non-union class type, T shall be a complete type.
-  case UTT_IsEmpty:
-  case UTT_IsPolymorphic:
-  case UTT_IsAbstract:
-    if (const auto *RD = ArgTy->getAsCXXRecordDecl())
-      if (!RD->isUnion())
-        return !S.RequireCompleteType(
-            Loc, ArgTy, diag::err_incomplete_type_used_in_type_trait_expr);
-    return true;
-
-  // C++14 [meta.unary.prop]:
-  //   If T is a class type, T shall be a complete type.
-  case UTT_IsFinal:
-  case UTT_IsSealed:
-    if (ArgTy->getAsCXXRecordDecl())
-      return !S.RequireCompleteType(
-          Loc, ArgTy, diag::err_incomplete_type_used_in_type_trait_expr);
-    return true;
-
-  // C++0x [meta.unary.prop] Table 49 requires the following traits to be
-  // applied to a complete type.
+    // C++0x [meta.unary.prop] Table 49 requires the following traits to be
+    // applied to a complete type.
   case UTT_IsTrivial:
   case UTT_IsTriviallyCopyable:
   case UTT_IsStandardLayout:
   case UTT_IsPOD:
   case UTT_IsLiteral:
-
+  case UTT_IsEmpty:
+  case UTT_IsPolymorphic:
+  case UTT_IsAbstract:
+  case UTT_IsInterfaceClass:
   case UTT_IsDestructible:
   case UTT_IsNothrowDestructible:
     // Fall-through
+
+  // These traits require a complete type.
+  case UTT_IsFinal:
+  case UTT_IsSealed:
 
     // These trait expressions are designed to help implement predicates in
     // [meta.unary.prop] despite not being named the same. They are specified
@@ -3745,21 +3724,24 @@ static bool EvaluateUnaryTypeTrait(Sema &Self, TypeTrait UTT,
     return false;
   case UTT_IsPolymorphic:
     if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
-      return !RD->isUnion() && RD->isPolymorphic();
+      return RD->isPolymorphic();
     return false;
   case UTT_IsAbstract:
     if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
-      return !RD->isUnion() && RD->isAbstract();
+      return RD->isAbstract();
     return false;
-  // __is_interface_class only returns true when CL is invoked in /CLR mode and
-  // even then only when it is used with the 'interface struct ...' syntax
-  // Clang doesn't support /CLR which makes this type trait moot.
   case UTT_IsInterfaceClass:
+    if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
+      return RD->isInterface();
     return false;
   case UTT_IsFinal:
-  case UTT_IsSealed:
     if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
       return RD->hasAttr<FinalAttr>();
+    return false;
+  case UTT_IsSealed:
+    if (const CXXRecordDecl *RD = T->getAsCXXRecordDecl())
+      if (FinalAttr *FA = RD->getAttr<FinalAttr>())
+        return FA->isSpelledAsSealed();
     return false;
   case UTT_IsSigned:
     return T->isSignedIntegerType();
@@ -4097,13 +4079,12 @@ static bool evaluateTypeTrait(Sema &S, TypeTrait Kind, SourceLocation KWLoc,
         return false;
     }
 
-    // Make sure the first argument is not incomplete nor a function type.
-    QualType T = Args[0]->getType();
-    if (T->isIncompleteType() || T->isFunctionType())
+    // Make sure the first argument is a complete type.
+    if (Args[0]->getType()->isIncompleteType())
       return false;
 
     // Make sure the first argument is not an abstract type.
-    CXXRecordDecl *RD = T->getAsCXXRecordDecl();
+    CXXRecordDecl *RD = Args[0]->getType()->getAsCXXRecordDecl();
     if (RD && RD->isAbstract())
       return false;
 
@@ -4111,13 +4092,13 @@ static bool evaluateTypeTrait(Sema &S, TypeTrait Kind, SourceLocation KWLoc,
     SmallVector<Expr *, 2> ArgExprs;
     ArgExprs.reserve(Args.size() - 1);
     for (unsigned I = 1, N = Args.size(); I != N; ++I) {
-      QualType ArgTy = Args[I]->getType();
-      if (ArgTy->isObjectType() || ArgTy->isFunctionType())
-        ArgTy = S.Context.getRValueReferenceType(ArgTy);
+      QualType T = Args[I]->getType();
+      if (T->isObjectType() || T->isFunctionType())
+        T = S.Context.getRValueReferenceType(T);
       OpaqueArgExprs.push_back(
-          OpaqueValueExpr(Args[I]->getTypeLoc().getLocStart(),
-                          ArgTy.getNonLValueExprType(S.Context),
-                          Expr::getValueKindForType(ArgTy)));
+        OpaqueValueExpr(Args[I]->getTypeLoc().getLocStart(),
+                        T.getNonLValueExprType(S.Context),
+                        Expr::getValueKindForType(T)));
     }
     for (Expr &E : OpaqueArgExprs)
       ArgExprs.push_back(&E);
@@ -4148,7 +4129,7 @@ static bool evaluateTypeTrait(Sema &S, TypeTrait Kind, SourceLocation KWLoc,
       // Under Objective-C ARC, if the destination has non-trivial Objective-C
       // lifetime, this is a non-trivial construction.
       if (S.getLangOpts().ObjCAutoRefCount &&
-          hasNontrivialObjCLifetime(T.getNonReferenceType()))
+          hasNontrivialObjCLifetime(Args[0]->getType().getNonReferenceType()))
         return false;
 
       // The initialization succeeded; now make sure there are no non-trivial
@@ -5989,7 +5970,8 @@ ExprResult Sema::ActOnPseudoDestructorExpr(Scope *S, Expr *Base,
     if (FirstTypeName.getKind() == UnqualifiedId::IK_Identifier) {
       ParsedType T = getTypeName(*FirstTypeName.Identifier,
                                  FirstTypeName.StartLocation,
-                                 S, &SS, true, false, ObjectTypePtrForLookup);
+                                 S, &SS, true, false, ObjectTypePtrForLookup
+								 /*@@*/, false, false, nullptr, true/*@@*/);	//@@@
       if (!T) {
         Diag(FirstTypeName.StartLocation,
              diag::err_pseudo_dtor_destructor_non_type)
@@ -6429,7 +6411,7 @@ static ExprResult attemptRecovery(Sema &SemaRef,
       if (MightBeImplicitMember)
         return SemaRef.BuildPossibleImplicitMemberExpr(
             NewSS, /*TemplateKWLoc*/ SourceLocation(), R,
-            /*TemplateArgs*/ nullptr, /*S*/ nullptr);
+            /*TemplateArgs*/ nullptr);
     } else if (auto *Ivar = dyn_cast<ObjCIvarDecl>(ND)) {
       return SemaRef.LookupInObjCMethod(R, Consumer.getScope(),
                                         Ivar->getIdentifier());
@@ -6558,8 +6540,6 @@ public:
   }
 
   ExprResult TransformLambdaExpr(LambdaExpr *E) { return Owned(E); }
-
-  ExprResult TransformBlockExpr(BlockExpr *E) { return Owned(E); }
 
   ExprResult Transform(Expr *E) {
     ExprResult Res;

@@ -30,7 +30,6 @@
 #include "clang/Serialization/ASTBitCodes.h"
 #include "clang/Serialization/ContinuousRangeMap.h"
 #include "clang/Serialization/Module.h"
-#include "clang/Serialization/ModuleFileExtension.h"
 #include "clang/Serialization/ModuleManager.h"
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/APInt.h"
@@ -39,7 +38,6 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TinyPtrVector.h"
 #include "llvm/Bitcode/BitstreamReader.h"
@@ -207,10 +205,6 @@ public:
   /// \brief If needsImportVisitation returns \c true, this is called for each
   /// AST file imported by this AST file.
   virtual void visitImport(StringRef Filename) {}
-
-  /// Indicates that a particular module file extension has been read.
-  virtual void readModuleFileExtension(
-                 const ModuleFileExtensionMetadata &Metadata) {}
 };
 
 /// \brief Simple wrapper class for chaining listeners.
@@ -253,8 +247,6 @@ public:
                        serialization::ModuleKind Kind) override;
   bool visitInputFile(StringRef Filename, bool isSystem,
                       bool isOverridden, bool isExplicitModule) override;
-  void readModuleFileExtension(
-         const ModuleFileExtensionMetadata &Metadata) override;
 };
 
 /// \brief ASTReaderListener implementation to validate the information of
@@ -290,8 +282,9 @@ class ReadMethodPoolVisitor;
 
 namespace reader {
   class ASTIdentifierLookupTrait;
-  /// \brief The on-disk hash table(s) used for DeclContext name lookup.
-  struct DeclContextLookupTable;
+  /// \brief The on-disk hash table used for the DeclContext's Name lookup table.
+  typedef llvm::OnDiskIterableChainedHashTable<ASTDeclContextNameLookupTrait>
+    ASTDeclContextNameLookupTable;
 }
 
 } // end namespace serialization
@@ -389,9 +382,6 @@ private:
 
   /// \brief The module manager which manages modules and their dependencies
   ModuleManager ModuleMgr;
-
-  /// A mapping from extension block names to module file extensions.
-  llvm::StringMap<IntrusiveRefCntPtr<ModuleFileExtension>> ModuleFileExtensions;
 
   /// \brief A timer used to track the time spent deserializing.
   std::unique_ptr<llvm::Timer> ReadTimer;
@@ -517,10 +507,6 @@ private:
   /// \brief Map from the TU to its lexical contents from each module file.
   std::vector<std::pair<ModuleFile*, LexicalContents>> TULexicalDecls;
 
-  /// \brief Map from a DeclContext to its lookup tables.
-  llvm::DenseMap<const DeclContext *,
-                 serialization::reader::DeclContextLookupTable> Lookups;
-
   // Updates for visible decls can occur for other contexts than just the
   // TU, and when we read those update records, the actual context may not
   // be available yet, so have this pending map using the ID as a key. It
@@ -528,6 +514,7 @@ private:
   struct PendingVisibleUpdate {
     ModuleFile *Mod;
     const unsigned char *Data;
+    unsigned BucketOffset;
   };
   typedef SmallVector<PendingVisibleUpdate, 1> DeclContextVisibleUpdates;
 
@@ -1058,7 +1045,6 @@ private:
     off_t StoredSize;
     time_t StoredTime;
     bool Overridden;
-    bool Transient;
   };
 
   /// \brief Reads the stored information about an input file.
@@ -1103,10 +1089,6 @@ public:
         Visit(GetExistingDecl(ID));
   }
 
-  /// \brief Get the loaded lookup tables for \p Primary, if any.
-  const serialization::reader::DeclContextLookupTable *
-  getLoadedLookupTables(DeclContext *Primary) const;
-
 private:
   struct ImportedModule {
     ModuleFile *Mod;
@@ -1129,12 +1111,7 @@ private:
                                  SmallVectorImpl<ImportedModule> &Loaded,
                                  const ModuleFile *ImportedBy,
                                  unsigned ClientLoadCapabilities);
-  static ASTReadResult ReadOptionsBlock(
-      llvm::BitstreamCursor &Stream, unsigned ClientLoadCapabilities,
-      bool AllowCompatibleConfigurationMismatch, ASTReaderListener &Listener,
-      std::string &SuggestedPredefines);
   ASTReadResult ReadASTBlock(ModuleFile &F, unsigned ClientLoadCapabilities);
-  ASTReadResult ReadExtensionBlock(ModuleFile &F);
   bool ParseLineTable(ModuleFile &F, const RecordData &Record);
   bool ReadSourceManagerBlock(ModuleFile &F);
   llvm::BitstreamCursor &SLocCursorForID(int ID);
@@ -1286,9 +1263,6 @@ public:
   /// \param PCHContainerRdr the PCHContainerOperations to use for loading and
   /// creating modules.
   ///
-  /// \param Extensions the list of module file extensions that can be loaded
-  /// from the AST files.
-  ///
   /// \param isysroot If non-NULL, the system include path specified by the
   /// user. This is only used with relocatable PCH files. If non-NULL,
   /// a relocatable PCH file will use the default path "/".
@@ -1315,7 +1289,6 @@ public:
   /// deserializing.
   ASTReader(Preprocessor &PP, ASTContext &Context,
             const PCHContainerReader &PCHContainerRdr,
-            ArrayRef<IntrusiveRefCntPtr<ModuleFileExtension>> Extensions,
             StringRef isysroot = "", bool DisableValidation = false,
             bool AllowASTWithCompilerErrors = false,
             bool AllowConfigurationMismatch = false,
@@ -1326,7 +1299,6 @@ public:
 
   SourceManager &getSourceManager() const { return SourceMgr; }
   FileManager &getFileManager() const { return FileMgr; }
-  DiagnosticsEngine &getDiags() const { return Diags; }
 
   /// \brief Flags that indicate what kind of AST loading failures the client
   /// of the AST reader can directly handle.
@@ -1494,7 +1466,6 @@ public:
   static bool
   readASTFileControlBlock(StringRef Filename, FileManager &FileMgr,
                           const PCHContainerReader &PCHContainerRdr,
-                          bool FindModuleFileExtensions,
                           ASTReaderListener &Listener);
 
   /// \brief Determine whether the given AST file is acceptable to load into a
@@ -1712,7 +1683,7 @@ public:
   /// ReadBlockAbbrevs - Enter a subblock of the specified BlockID with the
   /// specified cursor.  Read the abbreviations that are at the top of the block
   /// and then leave the cursor pointing into the block.
-  static bool ReadBlockAbbrevs(llvm::BitstreamCursor &Cursor, unsigned BlockID);
+  bool ReadBlockAbbrevs(llvm::BitstreamCursor &Cursor, unsigned BlockID);
 
   /// \brief Finds all the visible declarations with a given name.
   /// The current implementation of this method just loads the entire
@@ -1899,15 +1870,10 @@ public:
   /// Note: overrides method in ExternalASTSource
   Module *getModule(unsigned ID) override;
 
-  /// \brief Retrieve the module file with a given local ID within the specified
-  /// ModuleFile.
-  ModuleFile *getLocalModuleFile(ModuleFile &M, unsigned ID);
-
-  /// \brief Get an ID for the given module file.
-  unsigned getModuleFileID(ModuleFile *M);
-
   /// \brief Return a descriptor for the corresponding module.
   llvm::Optional<ASTSourceDescriptor> getSourceDescriptor(unsigned ID) override;
+  /// \brief Return a descriptor for the module.
+  ASTSourceDescriptor getSourceDescriptor(const Module &M) override;
 
   /// \brief Retrieve a selector from the given module with its local ID
   /// number.

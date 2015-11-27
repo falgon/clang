@@ -18,7 +18,6 @@
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
-#include "clang/Driver/ToolChain.h"
 #include "clang/Frontend/ChainedDiagnosticConsumer.h"
 #include "clang/Frontend/CompilerInvocation.h"
 #include "clang/Frontend/SerializedDiagnosticPrinter.h"
@@ -45,6 +44,7 @@
 #include "llvm/Support/Regex.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/StringSaver.h"
+#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/Timer.h"
 #include "llvm/Support/raw_ostream.h"
@@ -198,25 +198,106 @@ static void ApplyQAOverride(SmallVectorImpl<const char*> &Args,
 
 extern int cc1_main(ArrayRef<const char *> Argv, const char *Argv0,
                     void *MainAddr);
+extern int meta_cc1_main(ArrayRef<const char *> Argv, const char *Argv0,
+                    void *MainAddr);
 extern int cc1as_main(ArrayRef<const char *> Argv, const char *Argv0,
                       void *MainAddr);
 
-static void insertTargetAndModeArgs(StringRef Target, StringRef Mode,
-                                    SmallVectorImpl<const char *> &ArgVector,
-                                    std::set<std::string> &SavedStrings) {
-  if (!Mode.empty()) {
-    // Add the mode flag to the arguments.
-    auto it = ArgVector.begin();
-    if (it != ArgVector.end())
-      ++it;
-    ArgVector.insert(it, GetStableCStr(SavedStrings, Mode));
+struct DriverSuffix {
+  const char *Suffix;
+  const char *ModeFlag;
+};
+
+static const DriverSuffix *FindDriverSuffix(StringRef ProgName) {
+  // A list of known driver suffixes. Suffixes are compared against the
+  // program name in order. If there is a match, the frontend type if updated as
+  // necessary by applying the ModeFlag.
+  static const DriverSuffix DriverSuffixes[] = {
+      {"clang", nullptr},
+      {"clang++", "--driver-mode=g++"},
+      {"clang-c++", "--driver-mode=g++"},
+      {"clang-cc", nullptr},
+      {"clang-cpp", "--driver-mode=cpp"},
+      {"clang-g++", "--driver-mode=g++"},
+      {"clang-gcc", nullptr},
+      {"clang-cl", "--driver-mode=cl"},
+      {"cc", nullptr},
+      {"cpp", "--driver-mode=cpp"},
+      {"cl", "--driver-mode=cl"},
+      {"++", "--driver-mode=g++"},
+  };
+
+  for (size_t i = 0; i < llvm::array_lengthof(DriverSuffixes); ++i)
+    if (ProgName.endswith(DriverSuffixes[i].Suffix))
+      return &DriverSuffixes[i];
+  return nullptr;
+}
+
+/// Normalize the program name from argv[0] by stripping the file extension if
+/// present and lower-casing the string on Windows.
+static std::string normalizeProgramName(const char *Argv0) {
+  std::string ProgName = llvm::sys::path::stem(Argv0);
+#ifdef LLVM_ON_WIN32
+  // Transform to lowercase for case insensitive file systems.
+  std::transform(ProgName.begin(), ProgName.end(), ProgName.begin(), ::tolower);
+#endif
+  return ProgName;
+}
+
+static const DriverSuffix *parseDriverSuffix(StringRef ProgName) {
+  // Try to infer frontend type and default target from the program name by
+  // comparing it against DriverSuffixes in order.
+
+  // If there is a match, the function tries to identify a target as prefix.
+  // E.g. "x86_64-linux-clang" as interpreted as suffix "clang" with target
+  // prefix "x86_64-linux". If such a target prefix is found, is gets added via
+  // -target as implicit first argument.
+  const DriverSuffix *DS = FindDriverSuffix(ProgName);
+
+  if (!DS) {
+    // Try again after stripping any trailing version number:
+    // clang++3.5 -> clang++
+    ProgName = ProgName.rtrim("0123456789.");
+    DS = FindDriverSuffix(ProgName);
   }
 
-  if (!Target.empty()) {
+  if (!DS) {
+    // Try again after stripping trailing -component.
+    // clang++-tot -> clang++
+    ProgName = ProgName.slice(0, ProgName.rfind('-'));
+    DS = FindDriverSuffix(ProgName);
+  }
+   return DS;
+}
+
+static void insertArgsFromProgramName(StringRef ProgName,
+                                      const DriverSuffix *DS,
+                                      SmallVectorImpl<const char *> &ArgVector,
+                                      std::set<std::string> &SavedStrings) {
+  if (!DS)
+    return;
+
+  if (const char *Flag = DS->ModeFlag) {
+    // Add Flag to the arguments.
     auto it = ArgVector.begin();
     if (it != ArgVector.end())
       ++it;
-    const char *arr[] = {"-target", GetStableCStr(SavedStrings, Target)};
+    ArgVector.insert(it, Flag);
+  }
+
+  StringRef::size_type LastComponent = ProgName.rfind(
+      '-', ProgName.size() - strlen(DS->Suffix));
+  if (LastComponent == StringRef::npos)
+    return;
+
+  // Infer target from the prefix.
+  StringRef Prefix = ProgName.slice(0, LastComponent);
+  std::string IgnoredError;
+  if (llvm::TargetRegistry::lookupTarget(Prefix, IgnoredError)) {
+    auto it = ArgVector.begin();
+    if (it != ArgVector.end())
+      ++it;
+    const char *arr[] = { "-target", GetStableCStr(SavedStrings, Prefix) };
     ArgVector.insert(it, std::begin(arr), std::end(arr));
   }
 }
@@ -298,7 +379,7 @@ static void SetInstallDir(SmallVectorImpl<const char *> &argv,
 static int ExecuteCC1Tool(ArrayRef<const char *> argv, StringRef Tool) {
   void *GetExecutablePathVP = (void *)(intptr_t) GetExecutablePath;
   if (Tool == "")
-    return cc1_main(argv.slice(2), argv[0], GetExecutablePathVP);
+    return meta_cc1_main(argv.slice(2), argv[0], GetExecutablePathVP);
   if (Tool == "as")
     return cc1as_main(argv.slice(2), argv[0], GetExecutablePathVP);
 
@@ -323,10 +404,8 @@ int main(int argc_, const char **argv_) {
     return 1;
   }
 
-  llvm::InitializeAllTargets();
-  std::string ProgName = argv[0];
-  std::pair<std::string, std::string> TargetAndMode =
-      ToolChain::getTargetAndModeFromProgramName(ProgName);
+  std::string ProgName = normalizeProgramName(argv[0]);
+  const DriverSuffix *DS = parseDriverSuffix(ProgName);
 
   llvm::BumpPtrAllocator A;
   llvm::StringSaver Saver(A);
@@ -339,7 +418,7 @@ int main(int argc_, const char **argv_) {
   // Finally, our -cc1 tools don't care which tokenization mode we use because
   // response files written by clang will tokenize the same way in either mode.
   llvm::cl::TokenizerCallback Tokenizer = &llvm::cl::TokenizeGNUCommandLine;
-  if (TargetAndMode.second == "--driver-mode=cl" ||
+  if ((DS && DS->ModeFlag && strcmp(DS->ModeFlag, "--driver-mode=cl") == 0) ||
       std::find_if(argv.begin(), argv.end(), [](const char *F) {
         return F && strcmp(F, "--driver-mode=cl") == 0;
       }) != argv.end()) {
@@ -434,8 +513,8 @@ int main(int argc_, const char **argv_) {
   Driver TheDriver(Path, llvm::sys::getDefaultTargetTriple(), Diags);
   SetInstallDir(argv, TheDriver, CanonicalPrefixes);
 
-  insertTargetAndModeArgs(TargetAndMode.first, TargetAndMode.second, argv,
-                          SavedStrings);
+  llvm::InitializeAllTargets();
+  insertArgsFromProgramName(ProgName, DS, argv, SavedStrings);
 
   SetBackdoorDriverOutputsFromEnvVars(TheDriver);
 

@@ -96,7 +96,7 @@ void FindIdenticalExprVisitor::checkBitwiseOrLogicalOp(const BinaryOperator *B,
     }
     LHS = B2->getLHS();
   }
-
+  
   if (isIdenticalStmt(AC->getASTContext(), RHS, LHS)) {
     Sr[0] = RHS->getSourceRange();
     Sr[1] = LHS->getSourceRange();
@@ -400,6 +400,17 @@ static bool isIdenticalStmt(const ASTContext &Ctx, const Stmt *Stmt1,
       return false;
     return true;
   }
+//@@
+  case Stmt::ExecuteStmtClass: {
+    const ExecuteStmt *EStmt1 = cast<ExecuteStmt>(Stmt1);
+	const ExecuteStmt *EStmt2 = cast<ExecuteStmt>(Stmt2);
+
+    if (!isIdenticalStmt(Ctx, EStmt1->getStmt(), EStmt2->getStmt(),
+                         IgnoreSideEffects))
+      return false;
+    return true;
+  }
+//@@
   case Stmt::WhileStmtClass: {
     const WhileStmt *WStmt1 = cast<WhileStmt>(Stmt1);
     const WhileStmt *WStmt2 = cast<WhileStmt>(Stmt2);

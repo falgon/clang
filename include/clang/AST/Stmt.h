@@ -1017,6 +1017,44 @@ public:
   }
 };
 
+//@@
+/// ExecuteStmt - This represents a '.&' stmt.
+///
+class ExecuteStmt : public Stmt {
+  SourceLocation StartLoc;
+  SourceLocation EndLoc;
+  Stmt* stmt;	//may be a normal Stmt or a DeclStmt
+public:
+  ExecuteStmt(const ASTContext &C, Stmt *stmt, SourceLocation SL, SourceLocation EL);
+
+  /// \brief Build an empty while statement.
+  explicit ExecuteStmt(EmptyShell Empty) : Stmt(WhileStmtClass, Empty) { }
+
+  Stmt *getStmt() { return stmt; }
+  const Stmt *getStmt() const { return stmt; }
+  void setStmt(Stmt *S) { stmt = S; }
+
+  SourceLocation getStartLoc() const { return StartLoc; }
+  void setStartLoc(SourceLocation L) { StartLoc = L; }
+
+  SourceLocation getEndLoc() const { return EndLoc; }
+  void setEndLoc(SourceLocation L) { EndLoc = L; }
+
+  SourceLocation getLocStart() const LLVM_READONLY { return getStartLoc(); }
+  SourceLocation getLocEnd() const LLVM_READONLY { return getEndLoc(); }
+
+  SourceRange getInnerSourceRange() const LLVM_READONLY;
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == ExecuteStmtClass;
+  }
+
+  // Iterators
+  child_range children() {
+    return child_range(&stmt, &stmt+1);
+  }
+};
+//@@
 
 /// WhileStmt - This represents a 'while' stmt.
 ///

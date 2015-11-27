@@ -49,8 +49,7 @@ protected:
   static void verifyFormat(
       llvm::StringRef Code,
       const FormatStyle &Style = getGoogleStyle(FormatStyle::LK_JavaScript)) {
-    std::string result = format(test::messUp(Code), Style);
-    EXPECT_EQ(Code.str(), result) << "Formatted:\n" << result;
+    EXPECT_EQ(Code.str(), format(test::messUp(Code), Style));
   }
 };
 
@@ -100,26 +99,9 @@ TEST_F(FormatTestJS, LiteralOperatorsCanBeKeywords) {
   verifyFormat("not.and.or.not_eq = 1;");
 }
 
-TEST_F(FormatTestJS, ReservedWords) {
-  // JavaScript reserved words (aka keywords) are only illegal when used as
-  // Identifiers, but are legal as IdentifierNames.
-  verifyFormat("x.class.struct = 1;");
-  verifyFormat("x.case = 1;");
-  verifyFormat("x.interface = 1;");
-  verifyFormat("x = {\n"
-               "  a: 12,\n"
-               "  interface: 1,\n"
-               "  switch: 1,\n"
-               "};");
-  verifyFormat("var struct = 2;");
-  verifyFormat("var union = 2;");
-}
-
 TEST_F(FormatTestJS, ES6DestructuringAssignment) {
   verifyFormat("var [a, b, c] = [1, 2, 3];");
-  verifyFormat("let [a, b, c] = [1, 2, 3];");
   verifyFormat("var {a, b} = {a: 1, b: 2};");
-  verifyFormat("let {a, b} = {a: 1, b: 2};");
 }
 
 TEST_F(FormatTestJS, ContainerLiterals) {
@@ -254,8 +236,6 @@ TEST_F(FormatTestJS, GoogModules) {
                getGoogleJSStyleWithColumns(40));
   verifyFormat("var long = goog.require('this.is.really.absurdly.long');",
                getGoogleJSStyleWithColumns(40));
-  verifyFormat("goog.setTestOnly('this.is.really.absurdly.long');",
-               getGoogleJSStyleWithColumns(40));
 
   // These should be wrapped normally.
   verifyFormat(
@@ -283,28 +263,27 @@ TEST_F(FormatTestJS, ArrayLiterals) {
                "  bbbbbbbbbbbbbbbbbbbbbbbbbbb,\n"
                "  ccccccccccccccccccccccccccc\n"
                "];");
-  verifyFormat("var someVariable = SomeFunction([\n"
+  verifyFormat("var someVariable = SomeFuntion([\n"
                "  aaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
                "  bbbbbbbbbbbbbbbbbbbbbbbbbbb,\n"
                "  ccccccccccccccccccccccccccc\n"
                "]);");
-  verifyFormat("var someVariable = SomeFunction([\n"
+  verifyFormat("var someVariable = SomeFuntion([\n"
                "  [aaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbbbb],\n"
                "]);",
                getGoogleJSStyleWithColumns(51));
-  verifyFormat("var someVariable = SomeFunction(aaaa, [\n"
+  verifyFormat("var someVariable = SomeFuntion(aaaa, [\n"
                "  aaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
                "  bbbbbbbbbbbbbbbbbbbbbbbbbbb,\n"
                "  ccccccccccccccccccccccccccc\n"
                "]);");
-  verifyFormat("var someVariable = SomeFunction(\n"
-               "    aaaa,\n"
-               "    [\n"
-               "      aaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
-               "      bbbbbbbbbbbbbbbbbbbbbbbbbbb,\n"
-               "      ccccccccccccccccccccccccccc\n"
-               "    ],\n"
-               "    aaaa);");
+  verifyFormat("var someVariable = SomeFuntion(aaaa,\n"
+               "                               [\n"
+               "                                 aaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
+               "                                 bbbbbbbbbbbbbbbbbbbbbbbbbbb,\n"
+               "                                 ccccccccccccccccccccccccccc\n"
+               "                               ],\n"
+               "                               aaaa);");
 
   verifyFormat("someFunction([], {a: a});");
 }
@@ -326,11 +305,14 @@ TEST_F(FormatTestJS, FunctionLiterals) {
                "    style: {direction: ''}\n"
                "  }\n"
                "};");
-  verifyFormat("abc = xyz ? function() {\n"
-               "  return 1;\n"
-               "} : function() {\n"
-               "  return -1;\n"
-               "};");
+  EXPECT_EQ("abc = xyz ?\n"
+            "          function() {\n"
+            "            return 1;\n"
+            "          } :\n"
+            "          function() {\n"
+            "            return -1;\n"
+            "          };",
+            format("abc=xyz?function(){return 1;}:function(){return -1;};"));
 
   verifyFormat("var closure = goog.bind(\n"
                "    function() {  // comment\n"
@@ -382,13 +364,17 @@ TEST_F(FormatTestJS, FunctionLiterals) {
                "      someFunction();\n"
                "    }, this), aaaaaaaaaaaaaaaaa);");
 
-  verifyFormat("someFunction(goog.bind(function() {\n"
-               "  doSomething();\n"
-               "  doSomething();\n"
-               "}, this), goog.bind(function() {\n"
-               "  doSomething();\n"
-               "  doSomething();\n"
-               "}, this));");
+  // FIXME: This is not ideal yet.
+  verifyFormat("someFunction(goog.bind(\n"
+               "                 function() {\n"
+               "                   doSomething();\n"
+               "                   doSomething();\n"
+               "                 },\n"
+               "                 this),\n"
+               "             goog.bind(function() {\n"
+               "               doSomething();\n"
+               "               doSomething();\n"
+               "             }, this));");
 
   // FIXME: This is bad, we should be wrapping before "function() {".
   verifyFormat("someFunction(function() {\n"
@@ -448,12 +434,6 @@ TEST_F(FormatTestJS, InliningFunctionLiterals) {
                "  }\n"
                "}",
                Style);
-
-  Style.AllowShortFunctionsOnASingleLine = FormatStyle::SFS_Empty;
-  verifyFormat("var func = function() {\n"
-               "  return 1;\n"
-               "};",
-               Style);
 }
 
 TEST_F(FormatTestJS, MultipleFunctionLiterals) {
@@ -477,16 +457,16 @@ TEST_F(FormatTestJS, MultipleFunctionLiterals) {
                "      doFoo();\n"
                "      doBaz();\n"
                "    });\n");
-  verifyFormat("promise.then(\n"
-               "    [],\n"
-               "    function success() {\n"
-               "      doFoo();\n"
-               "      doBar();\n"
-               "    },\n"
-               "    function error() {\n"
-               "      doFoo();\n"
-               "      doBaz();\n"
-               "    });\n");
+  // FIXME: Here, we should probably break right after the "(" for consistency.
+  verifyFormat("promise.then([],\n"
+               "             function success() {\n"
+               "               doFoo();\n"
+               "               doBar();\n"
+               "             },\n"
+               "             function error() {\n"
+               "               doFoo();\n"
+               "               doBaz();\n"
+               "             });\n");
 
   verifyFormat("getSomeLongPromise()\n"
                "    .then(function(value) { body(); })\n"
@@ -528,13 +508,13 @@ TEST_F(FormatTestJS, ArrowFunctions) {
                "       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) =>\n"
                "          aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,\n"
                "};");
-  verifyFormat("var a = a.aaaaaaa(\n"
-               "    (a: a) => aaaaaaaaaaaaaaaaaaaaaaaaa(bbbbbbbbb) &&\n"
-               "              aaaaaaaaaaaaaaaaaaaaaaaaa(bbbbbbb));");
-  verifyFormat("var a = a.aaaaaaa(\n"
-               "    (a: a) => aaaaaaaaaaaaaaaaaaaaa(bbbbbbbbb) ?\n"
-               "                  aaaaaaaaaaaaaaaaaaaaa(bbbbbbb) :\n"
-               "                  aaaaaaaaaaaaaaaaaaaaa(bbbbbbb));");
+  verifyFormat(
+      "var a = a.aaaaaaa((a: a) => aaaaaaaaaaaaaaaaaaaaa(bbbbbbbbb) &&\n"
+      "                            aaaaaaaaaaaaaaaaaaaaa(bbbbbbb));");
+  verifyFormat(
+      "var a = a.aaaaaaa((a: a) => aaaaaaaaaaaaaaaaaaaaa(bbbbbbbbb) ?\n"
+      "                                aaaaaaaaaaaaaaaaaaaaa(bbbbbbb) :\n"
+      "                                aaaaaaaaaaaaaaaaaaaaa(bbbbbbb));");
 
   // FIXME: This is bad, we should be wrapping before "() => {".
   verifyFormat("someFunction(() => {\n"
@@ -548,11 +528,6 @@ TEST_F(FormatTestJS, ArrowFunctions) {
 TEST_F(FormatTestJS, ReturnStatements) {
   verifyFormat("function() {\n"
                "  return [hello, world];\n"
-               "}");
-}
-
-TEST_F(FormatTestJS, ForLoops) {
-  verifyFormat("for (var i in [2, 3]) {\n"
                "}");
 }
 
@@ -610,13 +585,6 @@ TEST_F(FormatTestJS, RegexLiteralClassification) {
 
   // Not regex literals.
   verifyFormat("var a = a / 2 + b / 3;");
-  verifyFormat("var a = a++ / 2;");
-  // Prefix unary can operate on regex literals, not that it makes sense.
-  verifyFormat("var a = ++/a/;");
-
-  // This is a known issue, regular expressions are incorrectly detected if
-  // directly following a closing parenthesis.
-  verifyFormat("if (foo) / bar /.exec(baz);");
 }
 
 TEST_F(FormatTestJS, RegexLiteralSpecialCharacters) {
@@ -634,18 +602,9 @@ TEST_F(FormatTestJS, RegexLiteralSpecialCharacters) {
   verifyFormat("var regex = /x|y/;");
   verifyFormat("var regex = /a{2}/;");
   verifyFormat("var regex = /a{1,3}/;");
-
   verifyFormat("var regex = /[abc]/;");
   verifyFormat("var regex = /[^abc]/;");
   verifyFormat("var regex = /[\\b]/;");
-  verifyFormat("var regex = /[/]/;");
-  verifyFormat("var regex = /[\\/]/;");
-  verifyFormat("var regex = /\\[/;");
-  verifyFormat("var regex = /\\\\[/]/;");
-  verifyFormat("var regex = /}[\"]/;");
-  verifyFormat("var regex = /}[/\"]/;");
-  verifyFormat("var regex = /}[\"/]/;");
-
   verifyFormat("var regex = /\\b/;");
   verifyFormat("var regex = /\\B/;");
   verifyFormat("var regex = /\\d/;");
@@ -934,9 +893,8 @@ TEST_F(FormatTestJS, TypeArguments) {
   verifyFormat("function f(): List<any> {}");
   verifyFormat("function aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa():\n"
                "    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb {}");
-  verifyFormat("function aaaaaaaaaa(\n"
-               "    aaaaaaaaaaaaaaaa: aaaaaaaaaaaaaaaaaaa,\n"
-               "    aaaaaaaaaaaaaaaa: aaaaaaaaaaaaaaaaaaa):\n"
+  verifyFormat("function aaaaaaaaaa(aaaaaaaaaaaaaaaa: aaaaaaaaaaaaaaaaaa,\n"
+               "                    aaaaaaaaaaaaaaaa: aaaaaaaaaaaaaaaaaa):\n"
                "    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa {}");
 }
 
@@ -960,24 +918,6 @@ TEST_F(FormatTestJS, OptionalTypes) {
 
 TEST_F(FormatTestJS, IndexSignature) {
   verifyFormat("var x: {[k: string]: v};");
-}
-
-TEST_F(FormatTestJS, WrapAfterParen) {
-  verifyFormat("xxxxxxxxxxx(\n"
-               "    aaa, aaa);",
-               getGoogleJSStyleWithColumns(20));
-  verifyFormat("xxxxxxxxxxx(\n"
-               "    aaa, aaa, aaa,\n"
-               "    aaa, aaa, aaa);",
-               getGoogleJSStyleWithColumns(20));
-  verifyFormat("xxxxxxxxxxx(\n"
-               "    aaaaaaaaaaaaaaaaaaaaaaaa,\n"
-               "    function(x) {\n"
-               "      y();  //\n"
-               "    });",
-               getGoogleJSStyleWithColumns(40));
-  verifyFormat("while (aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa &&\n"
-               "       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb) {\n}");
 }
 
 } // end namespace tooling

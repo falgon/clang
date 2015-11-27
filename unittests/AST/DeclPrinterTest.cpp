@@ -471,7 +471,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl1) {
     "struct A {"
     "  A();"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A()"));
 }
 
@@ -480,7 +480,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl2) {
     "struct A {"
     "  A(int a);"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A(int a)"));
 }
 
@@ -489,7 +489,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl3) {
     "struct A {"
     "  A(const A &a);"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A(const A &a)"));
 }
 
@@ -498,7 +498,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl4) {
     "struct A {"
     "  A(const A &a, int = 0);"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A(const A &a, int = 0)"));
 }
 
@@ -507,7 +507,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl5) {
     "struct A {"
     "  A(const A &&a);"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A(const A &&a)"));
 }
 
@@ -516,7 +516,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl6) {
     "struct A {"
     "  explicit A(int a);"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "explicit A(int a)"));
 }
 
@@ -525,7 +525,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl7) {
     "struct A {"
     "  constexpr A();"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "constexpr A()"));
 }
 
@@ -534,7 +534,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl8) {
     "struct A {"
     "  A() = default;"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A() = default"));
 }
 
@@ -543,7 +543,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl9) {
     "struct A {"
     "  A() = delete;"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A() = delete"));
 }
 
@@ -553,7 +553,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl10) {
     "struct A {"
     "  A(const A &a);"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A<T...>(const A<T...> &a)"));
     // WRONG; Should be: "A(const A<T...> &a);"
 }
@@ -564,7 +564,7 @@ TEST(DeclPrinter, TestCXXConstructorDecl11) {
     "struct A : public T... {"
     "  A(T&&... ts) : T(ts)... {}"
     "};",
-    cxxConstructorDecl(ofClass(hasName("A"))).bind("id"),
+    constructorDecl(ofClass(hasName("A"))).bind("id"),
     "A<T...>(T &&...ts) : T(ts)..."));
     // WRONG; Should be: "A(T &&...ts) : T(ts)... {}"
 }
@@ -574,7 +574,7 @@ TEST(DeclPrinter, TestCXXDestructorDecl1) {
     "struct A {"
     "  ~A();"
     "};",
-    cxxDestructorDecl(ofClass(hasName("A"))).bind("id"),
+    destructorDecl(ofClass(hasName("A"))).bind("id"),
     "~A()"));
 }
 
@@ -583,7 +583,7 @@ TEST(DeclPrinter, TestCXXDestructorDecl2) {
     "struct A {"
     "  virtual ~A();"
     "};",
-    cxxDestructorDecl(ofClass(hasName("A"))).bind("id"),
+    destructorDecl(ofClass(hasName("A"))).bind("id"),
     "virtual ~A()"));
 }
 
@@ -592,7 +592,7 @@ TEST(DeclPrinter, TestCXXConversionDecl1) {
     "struct A {"
     "  operator int();"
     "};",
-    cxxMethodDecl(ofClass(hasName("A"))).bind("id"),
+    methodDecl(ofClass(hasName("A"))).bind("id"),
     "operator int()"));
 }
 
@@ -601,7 +601,7 @@ TEST(DeclPrinter, TestCXXConversionDecl2) {
     "struct A {"
     "  operator bool();"
     "};",
-    cxxMethodDecl(ofClass(hasName("A"))).bind("id"),
+    methodDecl(ofClass(hasName("A"))).bind("id"),
     "operator bool()"));
 }
 
@@ -611,7 +611,7 @@ TEST(DeclPrinter, TestCXXConversionDecl3) {
     "struct A {"
     "  operator Z();"
     "};",
-    cxxMethodDecl(ofClass(hasName("A"))).bind("id"),
+    methodDecl(ofClass(hasName("A"))).bind("id"),
     "operator Z()"));
 }
 
@@ -621,7 +621,7 @@ TEST(DeclPrinter, TestCXXMethodDecl_AllocationFunction1) {
     "struct Z {"
     "  void *operator new(std::size_t);"
     "};",
-    cxxMethodDecl(ofClass(hasName("Z"))).bind("id"),
+    methodDecl(ofClass(hasName("Z"))).bind("id"),
     "void *operator new(std::size_t)"));
     // Should be: with semicolon
 }
@@ -632,7 +632,7 @@ TEST(DeclPrinter, TestCXXMethodDecl_AllocationFunction2) {
     "struct Z {"
     "  void *operator new[](std::size_t);"
     "};",
-    cxxMethodDecl(ofClass(hasName("Z"))).bind("id"),
+    methodDecl(ofClass(hasName("Z"))).bind("id"),
     "void *operator new[](std::size_t)"));
     // Should be: with semicolon
 }
@@ -642,7 +642,7 @@ TEST(DeclPrinter, TestCXXMethodDecl_AllocationFunction3) {
     "struct Z {"
     "  void operator delete(void *);"
     "};",
-    cxxMethodDecl(ofClass(hasName("Z"))).bind("id"),
+    methodDecl(ofClass(hasName("Z"))).bind("id"),
     "void operator delete(void *) noexcept"));
     // Should be: with semicolon, without noexcept?
 }
@@ -652,7 +652,7 @@ TEST(DeclPrinter, TestCXXMethodDecl_AllocationFunction4) {
     "struct Z {"
     "  void operator delete(void *);"
     "};",
-    cxxMethodDecl(ofClass(hasName("Z"))).bind("id"),
+    methodDecl(ofClass(hasName("Z"))).bind("id"),
     "void operator delete(void *)"));
     // Should be: with semicolon
 }
@@ -662,7 +662,7 @@ TEST(DeclPrinter, TestCXXMethodDecl_AllocationFunction5) {
     "struct Z {"
     "  void operator delete[](void *);"
     "};",
-    cxxMethodDecl(ofClass(hasName("Z"))).bind("id"),
+    methodDecl(ofClass(hasName("Z"))).bind("id"),
     "void operator delete[](void *) noexcept"));
     // Should be: with semicolon, without noexcept?
 }
@@ -690,7 +690,7 @@ TEST(DeclPrinter, TestCXXMethodDecl_Operator1) {
 
     ASSERT_TRUE(PrintedDeclCXX98Matches(
       Code,
-      cxxMethodDecl(ofClass(hasName("Z"))).bind("id"),
+      methodDecl(ofClass(hasName("Z"))).bind("id"),
       Expected));
   }
 }
@@ -714,7 +714,7 @@ TEST(DeclPrinter, TestCXXMethodDecl_Operator2) {
 
     ASSERT_TRUE(PrintedDeclCXX98Matches(
       Code,
-      cxxMethodDecl(ofClass(hasName("Z"))).bind("id"),
+      methodDecl(ofClass(hasName("Z"))).bind("id"),
       Expected));
   }
 }

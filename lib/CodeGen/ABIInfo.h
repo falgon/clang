@@ -25,8 +25,6 @@ namespace clang {
   class TargetInfo;
 
   namespace CodeGen {
-    class ABIArgInfo;
-    class Address;
     class CGCXXABI;
     class CGFunctionInfo;
     class CodeGenFunction;
@@ -81,15 +79,8 @@ namespace clang {
     // the ABI information any lower than CodeGen. Of course, for
     // VAArg handling it has to be at this level; there is no way to
     // abstract this out.
-    virtual CodeGen::Address EmitVAArg(CodeGen::CodeGenFunction &CGF,
-                                       CodeGen::Address VAListAddr,
-                                       QualType Ty) const = 0;
-
-    /// Emit the target dependent code to load a value of
-    /// \arg Ty from the \c __builtin_ms_va_list pointed to by \arg VAListAddr.
-    virtual CodeGen::Address EmitMSVAArg(CodeGen::CodeGenFunction &CGF,
-                                         CodeGen::Address VAListAddr,
-                                         QualType Ty) const;
+    virtual llvm::Value *EmitVAArg(llvm::Value *VAListAddr, QualType Ty,
+                                   CodeGen::CodeGenFunction &CGF) const = 0;
 
     virtual bool isHomogeneousAggregateBaseType(QualType Ty) const;
 
@@ -101,15 +92,6 @@ namespace clang {
     bool isHomogeneousAggregate(QualType Ty, const Type *&Base,
                                 uint64_t &Members) const;
 
-    /// A convenience method to return an indirect ABIArgInfo with an
-    /// expected alignment equal to the ABI alignment of the given type.
-    CodeGen::ABIArgInfo
-    getNaturalAlignIndirect(QualType Ty, bool ByRef = true,
-                            bool Realign = false,
-                            llvm::Type *Padding = nullptr) const;
-
-    CodeGen::ABIArgInfo
-    getNaturalAlignIndirectInReg(QualType Ty, bool Realign = false) const;
   };
 }  // end namespace clang
 

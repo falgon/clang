@@ -511,7 +511,8 @@ ExprResult Sema::CheckPackExpansion(Expr *Pattern, SourceLocation EllipsisLoc,
   //   The pattern of a pack expansion shall name one or more
   //   parameter packs that are not expanded by a nested pack
   //   expansion.
-  if (!Pattern->containsUnexpandedParameterPack()) {
+  if (!Pattern->containsUnexpandedParameterPack()
+	  /*@@*/ && !getCurScope()->getQuasiQuotesParent() /*@@*/) {
     Diag(EllipsisLoc, diag::err_pack_expansion_without_parameter_packs)
     << Pattern->getSourceRange();
     return ExprError();
@@ -737,7 +738,6 @@ bool Sema::containsUnexpandedParameterPacks(Declarator &D) {
   case TST_interface:
   case TST_class:
   case TST_auto:
-  case TST_auto_type:
   case TST_decltype_auto:
   case TST_unknown_anytype:
   case TST_error:
@@ -868,8 +868,8 @@ ExprResult Sema::ActOnSizeofParameterPackExpr(Scope *S,
 
   MarkAnyDeclReferenced(OpLoc, ParameterPack, true);
 
-  return SizeOfPackExpr::Create(Context, OpLoc, ParameterPack, NameLoc,
-                                RParenLoc);
+  return new (Context) SizeOfPackExpr(Context.getSizeType(), OpLoc, 
+                                      ParameterPack, NameLoc, RParenLoc);
 }
 
 TemplateArgumentLoc

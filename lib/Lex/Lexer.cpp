@@ -235,7 +235,7 @@ static size_t getSpellingSlow(const Token &Tok, const char *BufPtr,
   size_t Length = 0;
   const char *BufEnd = BufPtr + Tok.getLength();
 
-  if (tok::isStringLiteral(Tok.getKind())) {
+  if (Tok.is(tok::string_literal)) {
     // Munch the encoding-prefix and opening double-quote.
     while (BufPtr < BufEnd) {
       unsigned Size;
@@ -1354,9 +1354,7 @@ void Lexer::SkipBytes(unsigned Bytes, bool StartOfLine) {
 }
 
 static bool isAllowedIDChar(uint32_t C, const LangOptions &LangOpts) {
-  if (LangOpts.AsmPreprocessor) {
-    return false;
-  } else if (LangOpts.CPlusPlus11 || LangOpts.C11) {
+  if (LangOpts.CPlusPlus11 || LangOpts.C11) {
     static const llvm::sys::UnicodeCharSet C11AllowedIDChars(
         C11AllowedIDCharRanges);
     return C11AllowedIDChars.contains(C);
@@ -1373,9 +1371,7 @@ static bool isAllowedIDChar(uint32_t C, const LangOptions &LangOpts) {
 
 static bool isAllowedInitiallyIDChar(uint32_t C, const LangOptions &LangOpts) {
   assert(isAllowedIDChar(C, LangOpts));
-  if (LangOpts.AsmPreprocessor) {
-    return false;
-  } else if (LangOpts.CPlusPlus11 || LangOpts.C11) {
+  if (LangOpts.CPlusPlus11 || LangOpts.C11) {
     static const llvm::sys::UnicodeCharSet C11DisallowedInitialIDChars(
         C11DisallowedInitialIDCharRanges);
     return !C11DisallowedInitialIDChars.contains(C);
@@ -1736,7 +1732,7 @@ bool Lexer::LexStringLiteral(Token &Result, const char *CurPtr,
     if (C == '\n' || C == '\r' ||             // Newline.
         (C == 0 && CurPtr-1 == BufferEnd)) {  // End of file.
       if (!isLexingRawMode() && !LangOpts.AsmPreprocessor)
-        Diag(BufferPtr, diag::ext_unterminated_char_or_string) << 1;
+        Diag(BufferPtr, diag::ext_unterminated_string);
       FormTokenWithChars(Result, CurPtr-1, tok::unknown);
       return true;
     }
@@ -1760,7 +1756,7 @@ bool Lexer::LexStringLiteral(Token &Result, const char *CurPtr,
 
   // If a nul character existed in the string, warn about it.
   if (NulCharacter && !isLexingRawMode())
-    Diag(NulCharacter, diag::null_in_char_or_string) << 1;
+    Diag(NulCharacter, diag::null_in_string);
 
   // Update the location of the token as well as the BufferPtr instance var.
   const char *TokStart = BufferPtr;
@@ -1876,7 +1872,7 @@ bool Lexer::LexAngledStringLiteral(Token &Result, const char *CurPtr) {
 
   // If a nul character existed in the string, warn about it.
   if (NulCharacter && !isLexingRawMode())
-    Diag(NulCharacter, diag::null_in_char_or_string) << 1;
+    Diag(NulCharacter, diag::null_in_string);
 
   // Update the location of token as well as BufferPtr.
   const char *TokStart = BufferPtr;
@@ -1918,7 +1914,7 @@ bool Lexer::LexCharConstant(Token &Result, const char *CurPtr,
     if (C == '\n' || C == '\r' ||             // Newline.
         (C == 0 && CurPtr-1 == BufferEnd)) {  // End of file.
       if (!isLexingRawMode() && !LangOpts.AsmPreprocessor)
-        Diag(BufferPtr, diag::ext_unterminated_char_or_string) << 0;
+        Diag(BufferPtr, diag::ext_unterminated_char);
       FormTokenWithChars(Result, CurPtr-1, tok::unknown);
       return true;
     }
@@ -1942,7 +1938,7 @@ bool Lexer::LexCharConstant(Token &Result, const char *CurPtr,
 
   // If a nul character existed in the character, warn about it.
   if (NulCharacter && !isLexingRawMode())
-    Diag(NulCharacter, diag::null_in_char_or_string) << 0;
+    Diag(NulCharacter, diag::null_in_char);
 
   // Update the location of token as well as BufferPtr.
   const char *TokStart = BufferPtr;
@@ -3238,6 +3234,21 @@ LexNextToken:
       CurPtr = ConsumeChar(ConsumeChar(CurPtr, SizeTmp, Result),
                            SizeTmp2, Result);
     } else {
+		//@@
+		std::map<char, tok::TokenKind> mappings{
+			{ '<', tok::periodless		},
+			{ '~', tok::periodtilde		},
+			{ '!', tok::periodexclaim	},
+			{ '&', tok::periodamp		},
+			{ '@', tok::periodat		}
+		};
+		auto iterator = mappings.find(Char);
+		if (iterator != mappings.end()) {
+			Kind = iterator->second;
+			CurPtr += SizeTmp;
+		}
+		else
+		//@@
       Kind = tok::period;
     }
     break;
@@ -3467,7 +3478,11 @@ LexNextToken:
         CurPtr = ConsumeChar(CurPtr, SizeTmp, Result);
         Kind = tok::greatergreater;
       }
-      
+//@@
+    } else if (Char == '.') {
+      CurPtr = ConsumeChar(CurPtr, SizeTmp, Result);
+      Kind = tok::greaterperiod;
+//@@
     } else {
       Kind = tok::greater;
     }

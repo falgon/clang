@@ -504,8 +504,7 @@ public:
   ///
   /// Returns true if there was an error.
   bool TransformTemplateArgument(const TemplateArgumentLoc &Input,
-                                 TemplateArgumentLoc &Output,
-                                 bool Uneval = false);
+                                 TemplateArgumentLoc &Output);
 
   /// \brief Transform the given set of template arguments.
   ///
@@ -527,10 +526,8 @@ public:
   /// Returns true if an error occurred.
   bool TransformTemplateArguments(const TemplateArgumentLoc *Inputs,
                                   unsigned NumInputs,
-                                  TemplateArgumentListInfo &Outputs,
-                                  bool Uneval = false) {
-    return TransformTemplateArguments(Inputs, Inputs + NumInputs, Outputs,
-                                      Uneval);
+                                  TemplateArgumentListInfo &Outputs) {
+    return TransformTemplateArguments(Inputs, Inputs + NumInputs, Outputs);
   }
 
   /// \brief Transform the given set of template arguments.
@@ -550,8 +547,7 @@ public:
   template<typename InputIterator>
   bool TransformTemplateArguments(InputIterator First,
                                   InputIterator Last,
-                                  TemplateArgumentListInfo &Outputs,
-                                  bool Uneval = false);
+                                  TemplateArgumentListInfo &Outputs);
 
   /// \brief Fakes up a TemplateArgumentLoc for a given TemplateArgument.
   void InventTemplateArgumentLoc(const TemplateArgument &Arg,
@@ -848,11 +844,11 @@ public:
   /// \brief Build a new C++11 auto type.
   ///
   /// By default, builds a new AutoType with the given deduced type.
-  QualType RebuildAutoType(QualType Deduced, AutoTypeKeyword Keyword) {
+  QualType RebuildAutoType(QualType Deduced, bool IsDecltypeAuto) {
     // Note, IsDependent is always false here: we implicitly convert an 'auto'
     // which has been deduced to a dependent type into an undeduced 'auto', so
     // that we'll retry deduction after the transformation.
-    return SemaRef.Context.getAutoType(Deduced, Keyword,
+    return SemaRef.Context.getAutoType(Deduced, IsDecltypeAuto, 
                                        /*IsDependent*/ false);
   }
 
@@ -1186,6 +1182,17 @@ public:
     return getSema().ActOnFinishSwitchStmt(SwitchLoc, Switch, Body);
   }
 
+//@@
+  /// \brief Build a new execute statement.
+  ///
+  /// By default, performs semantic analysis to build the new statement.
+  /// Subclasses may override this routine to provide different behavior.
+  StmtResult RebuildExecuteStmt(SourceLocation StartLoc, SourceLocation EndLoc,
+								Stmt* S) {
+    return getSema().ActOnExecuteStmt(StartLoc, EndLoc, S);
+  }
+//@@
+
   /// \brief Build a new while statement.
   ///
   /// By default, performs semantic analysis to build the new statement.
@@ -1287,30 +1294,6 @@ public:
                                     Constraints, Clobbers, Exprs, EndLoc);
   }
 
-  /// \brief Build a new co_return statement.
-  ///
-  /// By default, performs semantic analysis to build the new statement.
-  /// Subclasses may override this routine to provide different behavior.
-  StmtResult RebuildCoreturnStmt(SourceLocation CoreturnLoc, Expr *Result) {
-    return getSema().BuildCoreturnStmt(CoreturnLoc, Result);
-  }
-
-  /// \brief Build a new co_await expression.
-  ///
-  /// By default, performs semantic analysis to build the new expression.
-  /// Subclasses may override this routine to provide different behavior.
-  ExprResult RebuildCoawaitExpr(SourceLocation CoawaitLoc, Expr *Result) {
-    return getSema().BuildCoawaitExpr(CoawaitLoc, Result);
-  }
-
-  /// \brief Build a new co_yield expression.
-  ///
-  /// By default, performs semantic analysis to build the new expression.
-  /// Subclasses may override this routine to provide different behavior.
-  ExprResult RebuildCoyieldExpr(SourceLocation CoyieldLoc, Expr *Result) {
-    return getSema().BuildCoyieldExpr(CoyieldLoc, Result);
-  }
-
   /// \brief Build a new Objective-C \@try statement.
   ///
   /// By default, performs semantic analysis to build the new statement.
@@ -1383,15 +1366,12 @@ public:
   ///
   /// By default, performs semantic analysis to build the new OpenMP clause.
   /// Subclasses may override this routine to provide different behavior.
-  OMPClause *RebuildOMPIfClause(OpenMPDirectiveKind NameModifier,
-                                Expr *Condition, SourceLocation StartLoc,
+  OMPClause *RebuildOMPIfClause(Expr *Condition,
+                                SourceLocation StartLoc,
                                 SourceLocation LParenLoc,
-                                SourceLocation NameModifierLoc,
-                                SourceLocation ColonLoc,
                                 SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPIfClause(NameModifier, Condition, StartLoc,
-                                         LParenLoc, NameModifierLoc, ColonLoc,
-                                         EndLoc);
+    return getSema().ActOnOpenMPIfClause(Condition, StartLoc,
+                                         LParenLoc, EndLoc);
   }
 
   /// \brief Build a new OpenMP 'final' clause.
@@ -1648,33 +1628,8 @@ public:
   OMPClause *RebuildOMPDeviceClause(Expr *Device, SourceLocation StartLoc,
                                     SourceLocation LParenLoc,
                                     SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPDeviceClause(Device, StartLoc, LParenLoc,
+    return getSema().ActOnOpenMPDeviceClause(Device, StartLoc, LParenLoc, 
                                              EndLoc);
-  }
-
-  /// \brief Build a new OpenMP 'map' clause.
-  ///
-  /// By default, performs semantic analysis to build the new OpenMP clause.
-  /// Subclasses may override this routine to provide different behavior.
-  OMPClause *RebuildOMPMapClause(
-      OpenMPMapClauseKind MapTypeModifier, OpenMPMapClauseKind MapType,
-      SourceLocation MapLoc, SourceLocation ColonLoc, ArrayRef<Expr *> VarList,
-      SourceLocation StartLoc, SourceLocation LParenLoc,
-      SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPMapClause(MapTypeModifier, MapType, MapLoc,
-                                          ColonLoc, VarList,StartLoc,
-                                          LParenLoc, EndLoc);
-  }
-
-  /// \brief Build a new OpenMP 'num_teams' clause.
-  ///
-  /// By default, performs semantic analysis to build the new statement.
-  /// Subclasses may override this routine to provide different behavior.
-  OMPClause *RebuildOMPNumTeamsClause(Expr *NumTeams, SourceLocation StartLoc,
-                                      SourceLocation LParenLoc,
-                                      SourceLocation EndLoc) {
-    return getSema().ActOnOpenMPNumTeamsClause(NumTeams, StartLoc, LParenLoc, 
-                                               EndLoc);
   }
 
   /// \brief Rebuild the operand to an Objective-C \@synchronized statement.
@@ -1764,7 +1719,6 @@ public:
   /// By default, performs semantic analysis to build the new statement.
   /// Subclasses may override this routine to provide different behavior.
   StmtResult RebuildCXXForRangeStmt(SourceLocation ForLoc,
-                                    SourceLocation CoawaitLoc,
                                     SourceLocation ColonLoc,
                                     Stmt *Range, Stmt *BeginEnd,
                                     Expr *Cond, Expr *Inc,
@@ -1787,8 +1741,7 @@ public:
       }
     }
 
-    return getSema().BuildCXXForRangeStmt(ForLoc, CoawaitLoc, ColonLoc,
-                                          Range, BeginEnd,
+    return getSema().BuildCXXForRangeStmt(ForLoc, ColonLoc, Range, BeginEnd,
                                           Cond, Inc, LoopVar, RParenLoc,
                                           Sema::BFRK_Rebuild);
   }
@@ -1901,11 +1854,12 @@ public:
   /// By default, performs semantic analysis to build the new expression.
   /// Subclasses may override this routine to provide different behavior.
   ExprResult RebuildOffsetOfExpr(SourceLocation OperatorLoc,
-                                 TypeSourceInfo *Type,
-                                 ArrayRef<Sema::OffsetOfComponent> Components,
-                                 SourceLocation RParenLoc) {
+                                       TypeSourceInfo *Type,
+                                       Sema::OffsetOfComponent *Components,
+                                       unsigned NumComponents,
+                                       SourceLocation RParenLoc) {
     return getSema().BuildBuiltinOffsetOf(OperatorLoc, Type, Components,
-                                          RParenLoc);
+                                          NumComponents, RParenLoc);
   }
 
   /// \brief Build a new sizeof, alignof or vec_step expression with a
@@ -2025,8 +1979,7 @@ public:
     return getSema().BuildMemberReferenceExpr(Base, BaseType, OpLoc, isArrow,
                                               SS, TemplateKWLoc,
                                               FirstQualifierInScope,
-                                              R, ExplicitTemplateArgs,
-                                              /*S*/nullptr);
+                                              R, ExplicitTemplateArgs);
   }
 
   /// \brief Build a new binary operator expression.
@@ -2092,8 +2045,7 @@ public:
                                               SS, SourceLocation(),
                                               /*FirstQualifierInScope*/ nullptr,
                                               NameInfo,
-                                              /* TemplateArgs */ nullptr,
-                                              /*S*/ nullptr);
+                                              /* TemplateArgs */ nullptr);
   }
 
   /// \brief Build a new initializer list expression.
@@ -2541,7 +2493,7 @@ public:
                                                     TemplateArgs);
 
     return getSema().BuildQualifiedDeclarationNameExpr(
-        SS, NameInfo, IsAddressOfOperand, /*S*/nullptr, RecoveryTSI);
+        SS, NameInfo, IsAddressOfOperand, RecoveryTSI);
   }
 
   /// \brief Build a new template-id expression.
@@ -2635,7 +2587,7 @@ public:
                                             SS, TemplateKWLoc,
                                             FirstQualifierInScope,
                                             MemberNameInfo,
-                                            TemplateArgs, /*S*/nullptr);
+                                            TemplateArgs);
   }
 
   /// \brief Build a new member reference expression.
@@ -2657,7 +2609,7 @@ public:
                                             OperatorLoc, IsArrow,
                                             SS, TemplateKWLoc,
                                             FirstQualifierInScope,
-                                            R, TemplateArgs, /*S*/nullptr);
+                                            R, TemplateArgs);
   }
 
   /// \brief Build a new noexcept expression.
@@ -2669,14 +2621,18 @@ public:
   }
 
   /// \brief Build a new expression to compute the length of a parameter pack.
-  ExprResult RebuildSizeOfPackExpr(SourceLocation OperatorLoc,
-                                   NamedDecl *Pack,
+  ExprResult RebuildSizeOfPackExpr(SourceLocation OperatorLoc, NamedDecl *Pack,
                                    SourceLocation PackLoc,
                                    SourceLocation RParenLoc,
-                                   Optional<unsigned> Length,
-                                   ArrayRef<TemplateArgument> PartialArgs) {
-    return SizeOfPackExpr::Create(SemaRef.Context, OperatorLoc, Pack, PackLoc,
-                                  RParenLoc, Length, PartialArgs);
+                                   Optional<unsigned> Length) {
+    if (Length)
+      return new (SemaRef.Context) SizeOfPackExpr(SemaRef.Context.getSizeType(),
+                                                  OperatorLoc, Pack, PackLoc,
+                                                  RParenLoc, *Length);
+
+    return new (SemaRef.Context) SizeOfPackExpr(SemaRef.Context.getSizeType(),
+                                                OperatorLoc, Pack, PackLoc,
+                                                RParenLoc);
   }
 
   /// \brief Build a new Objective-C boxed expression.
@@ -2793,8 +2749,7 @@ public:
                                               SS, SourceLocation(),
                                               /*FirstQualifierInScope=*/nullptr,
                                               NameInfo,
-                                              /*TemplateArgs=*/nullptr,
-                                              /*S=*/nullptr);
+                                              /*TemplateArgs=*/nullptr);
   }
 
   /// \brief Build a new Objective-C property reference expression.
@@ -2812,8 +2767,7 @@ public:
                                               SS, SourceLocation(),
                                               /*FirstQualifierInScope=*/nullptr,
                                               NameInfo,
-                                              /*TemplateArgs=*/nullptr,
-                                              /*S=*/nullptr);
+                                              /*TemplateArgs=*/nullptr);
   }
 
   /// \brief Build a new Objective-C property reference expression.
@@ -2845,8 +2799,7 @@ public:
                                               SS, SourceLocation(),
                                               /*FirstQualifierInScope=*/nullptr,
                                               NameInfo,
-                                              /*TemplateArgs=*/nullptr,
-                                              /*S=*/nullptr);
+                                              /*TemplateArgs=*/nullptr);
   }
 
   /// \brief Build a new shuffle vector expression.
@@ -3561,7 +3514,7 @@ void TreeTransform<Derived>::InventTemplateArgumentLoc(
 template<typename Derived>
 bool TreeTransform<Derived>::TransformTemplateArgument(
                                          const TemplateArgumentLoc &Input,
-                                         TemplateArgumentLoc &Output, bool Uneval) {
+                                         TemplateArgumentLoc &Output) {
   const TemplateArgument &Arg = Input.getArgument();
   switch (Arg.getKind()) {
   case TemplateArgument::Null:
@@ -3609,8 +3562,8 @@ bool TreeTransform<Derived>::TransformTemplateArgument(
 
   case TemplateArgument::Expression: {
     // Template argument expressions are constant expressions.
-    EnterExpressionEvaluationContext Unevaluated(
-        getSema(), Uneval ? Sema::Unevaluated : Sema::ConstantEvaluated);
+    EnterExpressionEvaluationContext Unevaluated(getSema(),
+                                                 Sema::ConstantEvaluated);
 
     Expr *InputExpr = Input.getSourceExpression();
     if (!InputExpr) InputExpr = Input.getArgument().getAsExpr();
@@ -3688,9 +3641,9 @@ public:
 
 template<typename Derived>
 template<typename InputIterator>
-bool TreeTransform<Derived>::TransformTemplateArguments(
-    InputIterator First, InputIterator Last, TemplateArgumentListInfo &Outputs,
-    bool Uneval) {
+bool TreeTransform<Derived>::TransformTemplateArguments(InputIterator First,
+                                                        InputIterator Last,
+                                            TemplateArgumentListInfo &Outputs) {
   for (; First != Last; ++First) {
     TemplateArgumentLoc Out;
     TemplateArgumentLoc In = *First;
@@ -3708,7 +3661,7 @@ bool TreeTransform<Derived>::TransformTemplateArguments(
                                                  In.getArgument().pack_begin()),
                                      PackLocIterator(*this,
                                                    In.getArgument().pack_end()),
-                                     Outputs, Uneval))
+                                     Outputs))
         return true;
 
       continue;
@@ -3746,7 +3699,7 @@ bool TreeTransform<Derived>::TransformTemplateArguments(
         // expansion.
         TemplateArgumentLoc OutPattern;
         Sema::ArgumentPackSubstitutionIndexRAII SubstIndex(getSema(), -1);
-        if (getDerived().TransformTemplateArgument(Pattern, OutPattern, Uneval))
+        if (getDerived().TransformTemplateArgument(Pattern, OutPattern))
           return true;
 
         Out = getDerived().RebuildPackExpansion(OutPattern, Ellipsis,
@@ -3763,7 +3716,7 @@ bool TreeTransform<Derived>::TransformTemplateArguments(
       for (unsigned I = 0; I != *NumExpansions; ++I) {
         Sema::ArgumentPackSubstitutionIndexRAII SubstIndex(getSema(), I);
 
-        if (getDerived().TransformTemplateArgument(Pattern, Out, Uneval))
+        if (getDerived().TransformTemplateArgument(Pattern, Out))
           return true;
 
         if (Out.getArgument().containsUnexpandedParameterPack()) {
@@ -3781,7 +3734,7 @@ bool TreeTransform<Derived>::TransformTemplateArguments(
       if (RetainExpansion) {
         ForgetPartiallySubstitutedPackRAII Forget(getDerived());
 
-        if (getDerived().TransformTemplateArgument(Pattern, Out, Uneval))
+        if (getDerived().TransformTemplateArgument(Pattern, Out))
           return true;
 
         Out = getDerived().RebuildPackExpansion(Out, Ellipsis,
@@ -3796,7 +3749,7 @@ bool TreeTransform<Derived>::TransformTemplateArguments(
     }
 
     // The simple case:
-    if (getDerived().TransformTemplateArgument(In, Out, Uneval))
+    if (getDerived().TransformTemplateArgument(In, Out))
       return true;
 
     Outputs.addArgument(Out);
@@ -3913,7 +3866,7 @@ TreeTransform<Derived>::TransformQualifiedType(TypeLocBuilder &TLB,
         Qs.removeObjCLifetime();
         Deduced = SemaRef.Context.getQualifiedType(Deduced.getUnqualifiedType(),
                                                    Qs);
-        Result = SemaRef.Context.getAutoType(Deduced, AutoTy->getKeyword(),
+        Result = SemaRef.Context.getAutoType(Deduced, AutoTy->isDecltypeAuto(), 
                                 AutoTy->isDependentType());
         TLB.TypeWasModifiedSafely(Result);
       } else {
@@ -5116,7 +5069,7 @@ QualType TreeTransform<Derived>::TransformAutoType(TypeLocBuilder &TLB,
   QualType Result = TL.getType();
   if (getDerived().AlwaysRebuild() || NewDeduced != OldDeduced ||
       T->isDependentType()) {
-    Result = getDerived().RebuildAutoType(NewDeduced, T->getKeyword());
+    Result = getDerived().RebuildAutoType(NewDeduced, T->isDecltypeAuto());
     if (Result.isNull())
       return QualType();
   }
@@ -6139,6 +6092,21 @@ TreeTransform<Derived>::TransformSwitchStmt(SwitchStmt *S) {
                                             Body.get());
 }
 
+//@@
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformExecuteStmt(ExecuteStmt *S) {
+  StmtResult stmt = getDerived().TransformStmt(S->getStmt());
+  if (stmt.isInvalid())
+    return StmtError();
+
+  if (!getDerived().AlwaysRebuild() && stmt.get() == S->getStmt())
+    return Owned(S);
+
+  return getDerived().RebuildExecuteStmt(S->getStartLoc(), S->getEndLoc(), stmt.get());
+}
+//@@
+
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformWhileStmt(WhileStmt *S) {
@@ -6452,56 +6420,6 @@ TreeTransform<Derived>::TransformMSAsmStmt(MSAsmStmt *S) {
                                        TransformedExprs, S->getEndLoc());
 }
 
-// C++ Coroutines TS
-
-template<typename Derived>
-StmtResult
-TreeTransform<Derived>::TransformCoroutineBodyStmt(CoroutineBodyStmt *S) {
-  // The coroutine body should be re-formed by the caller if necessary.
-  return getDerived().TransformStmt(S->getBody());
-}
-
-template<typename Derived>
-StmtResult
-TreeTransform<Derived>::TransformCoreturnStmt(CoreturnStmt *S) {
-  ExprResult Result = getDerived().TransformInitializer(S->getOperand(),
-                                                        /*NotCopyInit*/false);
-  if (Result.isInvalid())
-    return StmtError();
-
-  // Always rebuild; we don't know if this needs to be injected into a new
-  // context or if the promise type has changed.
-  return getDerived().RebuildCoreturnStmt(S->getKeywordLoc(), Result.get());
-}
-
-template<typename Derived>
-ExprResult
-TreeTransform<Derived>::TransformCoawaitExpr(CoawaitExpr *E) {
-  ExprResult Result = getDerived().TransformInitializer(E->getOperand(),
-                                                        /*NotCopyInit*/false);
-  if (Result.isInvalid())
-    return ExprError();
-
-  // Always rebuild; we don't know if this needs to be injected into a new
-  // context or if the promise type has changed.
-  return getDerived().RebuildCoawaitExpr(E->getKeywordLoc(), Result.get());
-}
-
-template<typename Derived>
-ExprResult
-TreeTransform<Derived>::TransformCoyieldExpr(CoyieldExpr *E) {
-  ExprResult Result = getDerived().TransformInitializer(E->getOperand(),
-                                                        /*NotCopyInit*/false);
-  if (Result.isInvalid())
-    return ExprError();
-
-  // Always rebuild; we don't know if this needs to be injected into a new
-  // context or if the promise type has changed.
-  return getDerived().RebuildCoyieldExpr(E->getKeywordLoc(), Result.get());
-}
-
-// Objective-C Statements.
-
 template<typename Derived>
 StmtResult
 TreeTransform<Derived>::TransformObjCAtTryStmt(ObjCAtTryStmt *S) {
@@ -6791,7 +6709,6 @@ TreeTransform<Derived>::TransformCXXForRangeStmt(CXXForRangeStmt *S) {
       Inc.get() != S->getInc() ||
       LoopVar.get() != S->getLoopVarStmt()) {
     NewStmt = getDerived().RebuildCXXForRangeStmt(S->getForLoc(),
-                                                  S->getCoawaitLoc(),
                                                   S->getColonLoc(), Range.get(),
                                                   BeginEnd.get(), Cond.get(),
                                                   Inc.get(), LoopVar.get(),
@@ -6808,7 +6725,6 @@ TreeTransform<Derived>::TransformCXXForRangeStmt(CXXForRangeStmt *S) {
   // it now so we have a new statement to attach the body to.
   if (Body.get() != S->getBody() && NewStmt.get() == S) {
     NewStmt = getDerived().RebuildCXXForRangeStmt(S->getForLoc(),
-                                                  S->getCoawaitLoc(),
                                                   S->getColonLoc(), Range.get(),
                                                   BeginEnd.get(), Cond.get(),
                                                   Inc.get(), LoopVar.get(),
@@ -6916,25 +6832,6 @@ TreeTransform<Derived>::TransformMSPropertyRefExpr(MSPropertyRefExpr *E) {
       MSPropertyRefExpr(Base.get(), PD, E->isArrow(),
                         SemaRef.getASTContext().PseudoObjectTy, VK_LValue,
                         QualifierLoc, E->getMemberLoc());
-}
-
-template <typename Derived>
-ExprResult TreeTransform<Derived>::TransformMSPropertySubscriptExpr(
-    MSPropertySubscriptExpr *E) {
-  auto BaseRes = getDerived().TransformExpr(E->getBase());
-  if (BaseRes.isInvalid())
-    return ExprError();
-  auto IdxRes = getDerived().TransformExpr(E->getIdx());
-  if (IdxRes.isInvalid())
-    return ExprError();
-
-  if (!getDerived().AlwaysRebuild() &&
-      BaseRes.get() == E->getBase() &&
-      IdxRes.get() == E->getIdx())
-    return E;
-
-  return getDerived().RebuildArraySubscriptExpr(
-      BaseRes.get(), SourceLocation(), IdxRes.get(), E->getRBracketLoc());
 }
 
 template <typename Derived>
@@ -7338,9 +7235,8 @@ OMPClause *TreeTransform<Derived>::TransformOMPIfClause(OMPIfClause *C) {
   ExprResult Cond = getDerived().TransformExpr(C->getCondition());
   if (Cond.isInvalid())
     return nullptr;
-  return getDerived().RebuildOMPIfClause(
-      C->getNameModifier(), Cond.get(), C->getLocStart(), C->getLParenLoc(),
-      C->getNameModifierLoc(), C->getColonLoc(), C->getLocEnd());
+  return getDerived().RebuildOMPIfClause(Cond.get(), C->getLocStart(),
+                                         C->getLParenLoc(), C->getLocEnd());
 }
 
 template <typename Derived>
@@ -7387,7 +7283,7 @@ OMPClause *
 TreeTransform<Derived>::TransformOMPCollapseClause(OMPCollapseClause *C) {
   ExprResult E = getDerived().TransformExpr(C->getNumForLoops());
   if (E.isInvalid())
-    return nullptr;
+    return 0;
   return getDerived().RebuildOMPCollapseClause(
       E.get(), C->getLocStart(), C->getLParenLoc(), C->getLocEnd());
 }
@@ -7482,19 +7378,6 @@ TreeTransform<Derived>::TransformOMPCaptureClause(OMPCaptureClause *C) {
 template <typename Derived>
 OMPClause *
 TreeTransform<Derived>::TransformOMPSeqCstClause(OMPSeqCstClause *C) {
-  // No need to rebuild this clause, no template-dependent parameters.
-  return C;
-}
-
-template <typename Derived>
-OMPClause *
-TreeTransform<Derived>::TransformOMPThreadsClause(OMPThreadsClause *C) {
-  // No need to rebuild this clause, no template-dependent parameters.
-  return C;
-}
-
-template <typename Derived>
-OMPClause *TreeTransform<Derived>::TransformOMPSIMDClause(OMPSIMDClause *C) {
   // No need to rebuild this clause, no template-dependent parameters.
   return C;
 }
@@ -7692,32 +7575,6 @@ TreeTransform<Derived>::TransformOMPDeviceClause(OMPDeviceClause *C) {
       E.get(), C->getLocStart(), C->getLParenLoc(), C->getLocEnd());
 }
 
-template <typename Derived>
-OMPClause *TreeTransform<Derived>::TransformOMPMapClause(OMPMapClause *C) {
-  llvm::SmallVector<Expr *, 16> Vars;
-  Vars.reserve(C->varlist_size());
-  for (auto *VE : C->varlists()) {
-    ExprResult EVar = getDerived().TransformExpr(cast<Expr>(VE));
-    if (EVar.isInvalid())
-      return nullptr;
-    Vars.push_back(EVar.get());
-  }
-  return getDerived().RebuildOMPMapClause(
-      C->getMapTypeModifier(), C->getMapType(), C->getMapLoc(),
-      C->getColonLoc(), Vars, C->getLocStart(), C->getLParenLoc(),
-      C->getLocEnd());
-}
-
-template <typename Derived>
-OMPClause *
-TreeTransform<Derived>::TransformOMPNumTeamsClause(OMPNumTeamsClause *C) {
-  ExprResult E = getDerived().TransformExpr(C->getNumTeams());
-  if (E.isInvalid())
-    return nullptr;
-  return getDerived().RebuildOMPNumTeamsClause(
-      E.get(), C->getLocStart(), C->getLParenLoc(), C->getLocEnd());
-}
-
 //===----------------------------------------------------------------------===//
 // Expression transformation
 //===----------------------------------------------------------------------===//
@@ -7870,6 +7727,28 @@ TreeTransform<Derived>::TransformParenExpr(ParenExpr *E) {
                                        E->getRParen());
 }
 
+//@@
+template<typename Derived>
+ExprResult
+TreeTransform<Derived>::TransformQuasiQuoteExpr(QuasiQuoteExpr *E) {
+	//@@TODO: transform properly
+	return E;
+	////getDerived().getSema().ActOnStartQuasiQuoteExpr(E->getStartLoc());
+	//QuotedElements *Elems = E->getElements();	//@@TODO tit
+	//if (!Elems) {
+	//	//getDerived().getSema().ActOnQuasiQuoteError();
+	//	return ExprError();
+	//}
+	//if (!getDerived().AlwaysRebuild() && Elems == E->getElements()) {
+	//	getDerived().getSema().ActOnQuasiQuoteExprError();
+	//	return E;
+	//}
+	//
+	//return getDerived().getSema().ActOnEndQuasiQuoteExpr(E->getStartLoc(),
+	//												E->getEndLoc(), Elems);
+}
+//@@
+
 /// \brief The operand of a unary address-of operator has special rules: it's
 /// allowed to refer to a non-static member of a class even if there's no 'this'
 /// object available.
@@ -7963,13 +7842,14 @@ TreeTransform<Derived>::TransformOffsetOfExpr(OffsetOfExpr *E) {
 
   // Build a new offsetof expression.
   return getDerived().RebuildOffsetOfExpr(E->getOperatorLoc(), Type,
-                                          Components, E->getRParenLoc());
+                                          Components.data(), Components.size(),
+                                          E->getRParenLoc());
 }
 
 template<typename Derived>
 ExprResult
 TreeTransform<Derived>::TransformOpaqueValueExpr(OpaqueValueExpr *E) {
-  assert((!E->getSourceExpr() || getDerived().AlreadyTransformed(E->getType())) &&
+  assert(getDerived().AlreadyTransformed(E->getType()) &&
          "opaque value expression requires transformation");
   return E;
 }
@@ -9273,20 +9153,9 @@ TreeTransform<Derived>::TransformUnresolvedLookupExpr(
   SourceLocation TemplateKWLoc = Old->getTemplateKeywordLoc();
 
   // If we have neither explicit template arguments, nor the template keyword,
-  // it's a normal declaration name or member reference.
-  if (!Old->hasExplicitTemplateArgs() && !TemplateKWLoc.isValid()) {
-    NamedDecl *D = R.getAsSingle<NamedDecl>();
-    // In a C++11 unevaluated context, an UnresolvedLookupExpr might refer to an
-    // instance member. In other contexts, BuildPossibleImplicitMemberExpr will
-    // give a good diagnostic.
-    if (D && D->isCXXInstanceMember()) {
-      return SemaRef.BuildPossibleImplicitMemberExpr(SS, TemplateKWLoc, R,
-                                                     /*TemplateArgs=*/nullptr,
-                                                     /*Scope=*/nullptr);
-    }
-
+  // it's a normal declaration name.
+  if (!Old->hasExplicitTemplateArgs() && !TemplateKWLoc.isValid())
     return getDerived().RebuildDeclarationNameExpr(SS, R, Old->requiresADL());
-  }
 
   // If we have template arguments, rebuild them, then rebuild the
   // templateid expression.
@@ -9693,10 +9562,9 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
 
     VarDecl *OldVD = C->getCapturedVar();
     QualType NewInitCaptureType =
-        getSema().buildLambdaInitCaptureInitialization(
-            C->getLocation(), OldVD->getType()->isReferenceType(),
-            OldVD->getIdentifier(),
-            C->getCapturedVar()->getInitStyle() != VarDecl::CInit, NewExprInit);
+        getSema().performLambdaInitCaptureInitialization(C->getLocation(),
+            OldVD->getType()->isReferenceType(), OldVD->getIdentifier(),
+            NewExprInit);
     NewExprInitResult = NewExprInit;
     InitCaptureExprsAndTypes[C - E->capture_begin()] =
         std::make_pair(NewExprInitResult, NewInitCaptureType);
@@ -9803,8 +9671,8 @@ TreeTransform<Derived>::TransformLambdaExpr(LambdaExpr *E) {
       }
       VarDecl *OldVD = C->getCapturedVar();
       VarDecl *NewVD = getSema().createLambdaInitCaptureVarDecl(
-          OldVD->getLocation(), InitExprTypePair.second, OldVD->getIdentifier(),
-          OldVD->getInitStyle(), Init.get());
+          OldVD->getLocation(), InitExprTypePair.second, 
+          OldVD->getIdentifier(), Init.get());
       if (!NewVD)
         Invalid = true;
       else {
@@ -10176,86 +10044,36 @@ TreeTransform<Derived>::TransformSizeOfPackExpr(SizeOfPackExpr *E) {
   if (!E->isValueDependent())
     return E;
 
-  EnterExpressionEvaluationContext Unevaluated(getSema(), Sema::Unevaluated);
+  // Note: None of the implementations of TryExpandParameterPacks can ever
+  // produce a diagnostic when given only a single unexpanded parameter pack,
+  // so
+  UnexpandedParameterPack Unexpanded(E->getPack(), E->getPackLoc());
+  bool ShouldExpand = false;
+  bool RetainExpansion = false;
+  Optional<unsigned> NumExpansions;
+  if (getDerived().TryExpandParameterPacks(E->getOperatorLoc(), E->getPackLoc(),
+                                           Unexpanded,
+                                           ShouldExpand, RetainExpansion,
+                                           NumExpansions))
+    return ExprError();
 
-  ArrayRef<TemplateArgument> PackArgs;
-  TemplateArgument ArgStorage;
+  if (RetainExpansion)
+    return E;
 
-  // Find the argument list to transform.
-  if (E->isPartiallySubstituted()) {
-    PackArgs = E->getPartialArguments();
-  } else if (E->isValueDependent()) {
-    UnexpandedParameterPack Unexpanded(E->getPack(), E->getPackLoc());
-    bool ShouldExpand = false;
-    bool RetainExpansion = false;
-    Optional<unsigned> NumExpansions;
-    if (getDerived().TryExpandParameterPacks(E->getOperatorLoc(), E->getPackLoc(),
-                                             Unexpanded,
-                                             ShouldExpand, RetainExpansion,
-                                             NumExpansions))
-      return ExprError();
-
-    // If we need to expand the pack, build a template argument from it and
-    // expand that.
-    if (ShouldExpand) {
-      auto *Pack = E->getPack();
-      if (auto *TTPD = dyn_cast<TemplateTypeParmDecl>(Pack)) {
-        ArgStorage = getSema().Context.getPackExpansionType(
-            getSema().Context.getTypeDeclType(TTPD), None);
-      } else if (auto *TTPD = dyn_cast<TemplateTemplateParmDecl>(Pack)) {
-        ArgStorage = TemplateArgument(TemplateName(TTPD), None);
-      } else {
-        auto *VD = cast<ValueDecl>(Pack);
-        ExprResult DRE = getSema().BuildDeclRefExpr(VD, VD->getType(),
-                                                    VK_RValue, E->getPackLoc());
-        if (DRE.isInvalid())
-          return ExprError();
-        ArgStorage = new (getSema().Context) PackExpansionExpr(
-            getSema().Context.DependentTy, DRE.get(), E->getPackLoc(), None);
-      }
-      PackArgs = ArgStorage;
-    }
-  }
-
-  // If we're not expanding the pack, just transform the decl.
-  if (!PackArgs.size()) {
-    auto *Pack = cast_or_null<NamedDecl>(
-        getDerived().TransformDecl(E->getPackLoc(), E->getPack()));
+  NamedDecl *Pack = E->getPack();
+  if (!ShouldExpand) {
+    Pack = cast_or_null<NamedDecl>(getDerived().TransformDecl(E->getPackLoc(),
+                                                              Pack));
     if (!Pack)
       return ExprError();
-    return getDerived().RebuildSizeOfPackExpr(E->getOperatorLoc(), Pack,
-                                              E->getPackLoc(),
-                                              E->getRParenLoc(), None, None);
   }
 
-  TemplateArgumentListInfo TransformedPackArgs(E->getPackLoc(),
-                                               E->getPackLoc());
-  {
-    TemporaryBase Rebase(*this, E->getPackLoc(), getBaseEntity());
-    typedef TemplateArgumentLocInventIterator<
-        Derived, const TemplateArgument*> PackLocIterator;
-    if (TransformTemplateArguments(PackLocIterator(*this, PackArgs.begin()),
-                                   PackLocIterator(*this, PackArgs.end()),
-                                   TransformedPackArgs, /*Uneval*/true))
-      return ExprError();
-  }
 
-  SmallVector<TemplateArgument, 8> Args;
-  bool PartialSubstitution = false;
-  for (auto &Loc : TransformedPackArgs.arguments()) {
-    Args.push_back(Loc.getArgument());
-    if (Loc.getArgument().isPackExpansion())
-      PartialSubstitution = true;
-  }
-
-  if (PartialSubstitution)
-    return getDerived().RebuildSizeOfPackExpr(E->getOperatorLoc(), E->getPack(),
-                                              E->getPackLoc(),
-                                              E->getRParenLoc(), None, Args);
-
-  return getDerived().RebuildSizeOfPackExpr(E->getOperatorLoc(), E->getPack(),
+  // We now know the length of the parameter pack, so build a new expression
+  // that stores that length.
+  return getDerived().RebuildSizeOfPackExpr(E->getOperatorLoc(), Pack,
                                             E->getPackLoc(), E->getRParenLoc(),
-                                            Args.size(), None);
+                                            NumExpansions);
 }
 
 template<typename Derived>
@@ -11416,8 +11234,7 @@ TreeTransform<Derived>::RebuildCXXPseudoDestructorExpr(Expr *Base,
                                             SS, TemplateKWLoc,
                                             /*FIXME: FirstQualifier*/ nullptr,
                                             NameInfo,
-                                            /*TemplateArgs*/ nullptr,
-                                            /*S*/nullptr);
+                                            /*TemplateArgs*/ nullptr);
 }
 
 template<typename Derived>
@@ -11456,4 +11273,4 @@ TreeTransform<Derived>::TransformCapturedStmt(CapturedStmt *S) {
 
 } // end namespace clang
 
-#endif // LLVM_CLANG_LIB_SEMA_TREETRANSFORM_H
+#endif

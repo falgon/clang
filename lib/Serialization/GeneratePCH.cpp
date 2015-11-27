@@ -23,15 +23,13 @@
 
 using namespace clang;
 
-PCHGenerator::PCHGenerator(
-  const Preprocessor &PP, StringRef OutputFile,
-  clang::Module *Module, StringRef isysroot,
-  std::shared_ptr<PCHBuffer> Buffer,
-  ArrayRef<llvm::IntrusiveRefCntPtr<ModuleFileExtension>> Extensions,
-  bool AllowASTWithErrors, bool IncludeTimestamps)
+PCHGenerator::PCHGenerator(const Preprocessor &PP, StringRef OutputFile,
+                           clang::Module *Module, StringRef isysroot,
+                           std::shared_ptr<PCHBuffer> Buffer,
+                           bool AllowASTWithErrors, bool IncludeTimestamps)
     : PP(PP), OutputFile(OutputFile), Module(Module), isysroot(isysroot.str()),
       SemaPtr(nullptr), Buffer(Buffer), Stream(Buffer->Data),
-      Writer(Stream, Extensions, IncludeTimestamps),
+      Writer(Stream, IncludeTimestamps),
       AllowASTWithErrors(AllowASTWithErrors) {
   Buffer->IsComplete = false;
 }
@@ -50,8 +48,7 @@ void PCHGenerator::HandleTranslationUnit(ASTContext &Ctx) {
 
   // Emit the PCH file to the Buffer.
   assert(SemaPtr && "No Sema?");
-  Buffer->Signature =
-      Writer.WriteAST(*SemaPtr, OutputFile, Module, isysroot, hasErrors);
+  Writer.WriteAST(*SemaPtr, OutputFile, Module, isysroot, hasErrors);
 
   Buffer->IsComplete = true;
 }

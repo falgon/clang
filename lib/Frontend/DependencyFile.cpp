@@ -51,8 +51,15 @@ struct DepCollectorPPCallbacks : public PPCallbacks {
     if (!FE)
       return;
 
-    StringRef Filename =
-        llvm::sys::path::remove_leading_dotslash(FE->getName());
+    StringRef Filename = FE->getName();
+
+    // Remove leading "./" (or ".//" or "././" etc.)
+    while (Filename.size() > 2 && Filename[0] == '.' &&
+           llvm::sys::path::is_separator(Filename[1])) {
+      Filename = Filename.substr(1);
+      while (llvm::sys::path::is_separator(Filename[0]))
+        Filename = Filename.substr(1);
+    }
 
     DepCollector.maybeAddDependency(Filename, /*FromModule*/false,
                                    FileType != SrcMgr::C_User,
@@ -288,7 +295,15 @@ void DFGImpl::FileChanged(SourceLocation Loc,
   if (!FileMatchesDepCriteria(Filename.data(), FileType))
     return;
 
-  AddFilename(llvm::sys::path::remove_leading_dotslash(Filename));
+  // Remove leading "./" (or ".//" or "././" etc.)
+  while (Filename.size() > 2 && Filename[0] == '.' &&
+         llvm::sys::path::is_separator(Filename[1])) {
+    Filename = Filename.substr(1);
+    while (llvm::sys::path::is_separator(Filename[0]))
+      Filename = Filename.substr(1);
+  }
+    
+  AddFilename(Filename);
 }
 
 void DFGImpl::InclusionDirective(SourceLocation HashLoc,

@@ -104,8 +104,17 @@ public:
       return false;
     if (!S->getThen() || !Visit(S->getThen()))
       return false;
-    return !S->getElse() || Visit(S->getElse());
+    if (S->getElse() && !Visit(S->getElse()))
+      return false;
+    return true;
   }
+  //@@
+  bool VisitExecuteStmt(ExecuteStmt *S) {
+    if (!S->getStmt())
+      return false;
+    return Visit(S->getStmt());
+  }
+  //@@
   bool VisitWhileStmt(WhileStmt *S) {
     if (S->getConditionVariable())
       return false;

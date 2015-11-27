@@ -152,7 +152,9 @@ public:
         return ID->getImplementation() != nullptr;
       if (ObjCCategoryDecl *CD = dyn_cast<ObjCCategoryDecl>(ContD))
         return CD->getImplementation() != nullptr;
-      return isa<ObjCImplDecl>(ContD);
+      if (isa<ObjCImplDecl>(ContD))
+        return true;
+      return false;
     }
     return false;
   }

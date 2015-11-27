@@ -185,10 +185,6 @@ int main(int argc, char **argv) {
 #pragma omp for private(i)
   for (int k = 0; k < argc; ++k)
     ++k;
-  static int si;
-#pragma omp for private(si) // OK
-  for(int k = 0; k < argc; ++k)
-    si = k + 1;
 
   return 0;
 }

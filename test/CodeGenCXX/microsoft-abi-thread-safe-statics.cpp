@@ -39,11 +39,15 @@ extern inline S &f() {
 // CHECK-NEXT:  ret %struct.S* @"\01?s@?1??f@@YAAAUS@@XZ@4U2@A"
 
 // CHECK:     [[lpad:.*]]:
-// CHECK-NEXT: cleanuppad []
+// CHECK-NEXT:  landingpad { i8*, i32 }
+// CHECK-NEXT:    cleanup
 // CHECK:       %[[guard:.*]] = load i32, i32* @"\01??__J?1??f@@YAAAUS@@XZ@51"
 // CHECK-NEXT:  %[[mask:.*]] = and i32 %[[guard]], -2
 // CHECK-NEXT:  store i32 %[[mask]], i32* @"\01??__J?1??f@@YAAAUS@@XZ@51"
-// CHECK-NEXT:  cleanupret {{.*}} unwind to caller
+// CHECK-NEXT:  br label %[[eh_resume:.*]]
+//
+// CHECK:     [[eh_resume]]:
+// CHECK:       resume { i8*, i32 }
   return s;
 }
 
@@ -75,9 +79,11 @@ extern inline S &g() {
 // CHECK-NEXT:  ret %struct.S* @"\01?s@?1??g@@YAAAUS@@XZ@4U2@A"
 //
 // CHECK:     [[lpad]]:
-// CHECK-NEXT: cleanuppad []
 // CHECK:       call void @_Init_thread_abort(i32* @"\01?$TSS0@?1??g@@YAAAUS@@XZ")
-// CHECK-NEXT:  cleanupret {{.*}} unwind to caller
+// CHECK-NEXT:  br label %[[eh_resume:.*]]
+//
+// CHECK:     [[eh_resume]]:
+// CHECK:       resume { i8*, i32 }
   return s;
 }
 

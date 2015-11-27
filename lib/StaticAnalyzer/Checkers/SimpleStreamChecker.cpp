@@ -200,9 +200,7 @@ void SimpleStreamChecker::checkDeadSymbols(SymbolReaper &SymReaper,
       State = State->remove<StreamMap>(Sym);
   }
 
-  ExplodedNode *N = C.generateNonFatalErrorNode(State);
-  if (!N)
-    return;
+  ExplodedNode *N = C.addTransition(State);
   reportLeaks(LeakedStreams, C, N);
 }
 
@@ -210,7 +208,7 @@ void SimpleStreamChecker::reportDoubleClose(SymbolRef FileDescSym,
                                             const CallEvent &Call,
                                             CheckerContext &C) const {
   // We reached a bug, stop exploring the path here by generating a sink.
-  ExplodedNode *ErrNode = C.generateErrorNode();
+  ExplodedNode *ErrNode = C.generateSink();
   // If we've already reached this node on another path, return.
   if (!ErrNode)
     return;

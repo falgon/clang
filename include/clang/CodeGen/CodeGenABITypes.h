@@ -75,12 +75,12 @@ private:
   /// Default CodeGenOptions object used to initialize the
   /// CodeGenModule and otherwise not used. More specifically, it is
   /// not used in ABI type generation, so none of the options matter.
-  std::unique_ptr<CodeGenOptions> CGO;
-  std::unique_ptr<HeaderSearchOptions> HSO;
-  std::unique_ptr<PreprocessorOptions> PPO;
+  CodeGenOptions *CGO;
+  HeaderSearchOptions *HSO;
+  PreprocessorOptions *PPO;
 
   /// The CodeGenModule we use get to the CodeGenTypes object.
-  std::unique_ptr<CodeGen::CodeGenModule> CGM;
+  CodeGen::CodeGenModule *CGM;
 };
 
 }  // end namespace CodeGen

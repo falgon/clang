@@ -448,7 +448,9 @@ DependentScopeDeclRefExpr::Create(const ASTContext &C,
                                   SourceLocation TemplateKWLoc,
                                   const DeclarationNameInfo &NameInfo,
                                   const TemplateArgumentListInfo *Args) {
-  assert(QualifierLoc && "should be created for dependent qualifiers");
+//@@
+  //this was: assert(QualifierLoc && "should be created for dependent qualifiers");
+//@@
   std::size_t size = sizeof(DependentScopeDeclRefExpr);
   if (Args)
     size += ASTTemplateKWAndArgsInfo::sizeFor(Args->size());
@@ -1432,25 +1434,6 @@ CXXRecordDecl *UnresolvedMemberExpr::getNamingClass() const {
   return Record;
 }
 
-SizeOfPackExpr *
-SizeOfPackExpr::Create(ASTContext &Context, SourceLocation OperatorLoc,
-                       NamedDecl *Pack, SourceLocation PackLoc,
-                       SourceLocation RParenLoc,
-                       Optional<unsigned> Length,
-                       ArrayRef<TemplateArgument> PartialArgs) {
-  void *Storage = Context.Allocate(
-      sizeof(SizeOfPackExpr) + sizeof(TemplateArgument) * PartialArgs.size());
-  return new (Storage) SizeOfPackExpr(Context.getSizeType(), OperatorLoc, Pack,
-                                      PackLoc, RParenLoc, Length, PartialArgs);
-}
-
-SizeOfPackExpr *SizeOfPackExpr::CreateDeserialized(ASTContext &Context,
-                                                   unsigned NumPartialArgs) {
-  void *Storage = Context.Allocate(
-      sizeof(SizeOfPackExpr) + sizeof(TemplateArgument) * NumPartialArgs);
-  return new (Storage) SizeOfPackExpr(EmptyShell(), NumPartialArgs);
-}
-
 SubstNonTypeTemplateParmPackExpr::
 SubstNonTypeTemplateParmPackExpr(QualType T, 
                                  NonTypeTemplateParmDecl *Param,
@@ -1468,19 +1451,19 @@ TemplateArgument SubstNonTypeTemplateParmPackExpr::getArgumentPack() const {
 FunctionParmPackExpr::FunctionParmPackExpr(QualType T, ParmVarDecl *ParamPack,
                                            SourceLocation NameLoc,
                                            unsigned NumParams,
-                                           ParmVarDecl *const *Params)
-    : Expr(FunctionParmPackExprClass, T, VK_LValue, OK_Ordinary, true, true,
-           true, true),
-      ParamPack(ParamPack), NameLoc(NameLoc), NumParameters(NumParams) {
+                                           Decl * const *Params)
+  : Expr(FunctionParmPackExprClass, T, VK_LValue, OK_Ordinary,
+         true, true, true, true),
+    ParamPack(ParamPack), NameLoc(NameLoc), NumParameters(NumParams) {
   if (Params)
     std::uninitialized_copy(Params, Params + NumParams,
-                            reinterpret_cast<ParmVarDecl **>(this + 1));
+                            reinterpret_cast<Decl**>(this+1));
 }
 
 FunctionParmPackExpr *
 FunctionParmPackExpr::Create(const ASTContext &Context, QualType T,
                              ParmVarDecl *ParamPack, SourceLocation NameLoc,
-                             ArrayRef<ParmVarDecl *> Params) {
+                             ArrayRef<Decl *> Params) {
   return new (Context.Allocate(sizeof(FunctionParmPackExpr) +
                                sizeof(ParmVarDecl*) * Params.size()))
     FunctionParmPackExpr(T, ParamPack, NameLoc, Params.size(), Params.data());

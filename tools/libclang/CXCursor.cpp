@@ -58,7 +58,6 @@ static CXCursorKind GetCursorKind(const Attr *A) {
     case attr::CUDAGlobal: return CXCursor_CUDAGlobalAttr;
     case attr::CUDAHost: return CXCursor_CUDAHostAttr;
     case attr::CUDAShared: return CXCursor_CUDASharedAttr;
-    case attr::Visibility: return CXCursor_VisibilityAttr;
   }
 
   return CXCursor_UnexposedAttr;
@@ -227,10 +226,6 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::AtomicExprClass:
   case Stmt::BinaryConditionalOperatorClass:
   case Stmt::TypeTraitExprClass:
-  case Stmt::CoroutineBodyStmtClass:
-  case Stmt::CoawaitExprClass:
-  case Stmt::CoreturnStmtClass:
-  case Stmt::CoyieldExprClass:
   case Stmt::CXXBindTemporaryExprClass:
   case Stmt::CXXDefaultArgExprClass:
   case Stmt::CXXDefaultInitExprClass:
@@ -272,6 +267,12 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::PseudoObjectExprClass:
     return MakeCXCursor(cast<PseudoObjectExpr>(S)->getSyntacticForm(),
                         Parent, TU, RegionOfInterest);
+
+//@@
+  case Stmt::QuasiQuoteExprClass:
+	  K = CXCursor_QuasiQuoteExpr;
+	  break;
+//@@
 
   case Stmt::CompoundStmtClass:
     K = CXCursor_CompoundStmt;
@@ -329,7 +330,6 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     K = CXCursor_UnaryExpr;
     break;
 
-  case Stmt::MSPropertySubscriptExprClass:
   case Stmt::ArraySubscriptExprClass:
     K = CXCursor_ArraySubscriptExpr;
     break;
@@ -607,6 +607,11 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
   case Stmt::OMPCancelDirectiveClass:
     K = CXCursor_OMPCancelDirective;
     break;
+//@@
+   case Stmt::ExecuteStmtClass:
+    K = CXCursor_ExecuteStmt;
+    break;
+//@@
   }
 
   CXCursor C = { K, 0, { Parent, S, TU } };

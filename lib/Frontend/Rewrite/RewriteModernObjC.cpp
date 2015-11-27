@@ -412,7 +412,7 @@ namespace {
     // Misc. AST transformation routines. Sometimes they end up calling
     // rewriting routines on the new ASTs.
     CallExpr *SynthesizeCallToFunctionDecl(FunctionDecl *FD,
-                                           ArrayRef<Expr *> Args,
+                                           Expr **args, unsigned nargs,
                                            SourceLocation StartLoc=SourceLocation(),
                                            SourceLocation EndLoc=SourceLocation());
     
@@ -2105,17 +2105,15 @@ Stmt *RewriteModernObjC::RewriteAtSelector(ObjCSelectorExpr *Exp) {
   SmallVector<Expr*, 8> SelExprs;
   SelExprs.push_back(getStringLiteral(Exp->getSelector().getAsString()));
   CallExpr *SelExp = SynthesizeCallToFunctionDecl(SelGetUidFunctionDecl,
-                                                  SelExprs);
+                                                 &SelExprs[0], SelExprs.size());
   ReplaceStmt(Exp, SelExp);
   // delete Exp; leak for now, see RewritePropertyOrImplicitSetter() usage for more info.
   return SelExp;
 }
 
-CallExpr *
-RewriteModernObjC::SynthesizeCallToFunctionDecl(FunctionDecl *FD,
-                                                ArrayRef<Expr *> Args,
-                                                SourceLocation StartLoc,
-                                                SourceLocation EndLoc) {
+CallExpr *RewriteModernObjC::SynthesizeCallToFunctionDecl(
+  FunctionDecl *FD, Expr **args, unsigned nargs, SourceLocation StartLoc,
+                                                    SourceLocation EndLoc) {
   // Get the type, we will need to reference it in a couple spots.
   QualType msgSendType = FD->getType();
 
@@ -2131,9 +2129,10 @@ RewriteModernObjC::SynthesizeCallToFunctionDecl(FunctionDecl *FD,
 
   const FunctionType *FT = msgSendType->getAs<FunctionType>();
 
-  CallExpr *Exp =  new (Context) CallExpr(*Context, ICE, Args,
-                                          FT->getCallResultType(*Context),
-                                          VK_RValue, EndLoc);
+  CallExpr *Exp =  
+    new (Context) CallExpr(*Context, ICE, llvm::makeArrayRef(args, nargs),
+                           FT->getCallResultType(*Context),
+                           VK_RValue, EndLoc);
   return Exp;
 }
 
@@ -2661,7 +2660,9 @@ Stmt *RewriteModernObjC::RewriteObjCBoxedExpr(ObjCBoxedExpr *Exp) {
   
   IdentifierInfo *clsName = BoxingClass->getIdentifier();
   ClsExprs.push_back(getStringLiteral(clsName->getName()));
-  CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl, ClsExprs,
+  CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl,
+                                               &ClsExprs[0],
+                                               ClsExprs.size(), 
                                                StartLoc, EndLoc);
   MsgExprs.push_back(Cls);
   
@@ -2671,7 +2672,8 @@ Stmt *RewriteModernObjC::RewriteObjCBoxedExpr(ObjCBoxedExpr *Exp) {
   SelExprs.push_back(
       getStringLiteral(BoxingMethod->getSelector().getAsString()));
   CallExpr *SelExp = SynthesizeCallToFunctionDecl(SelGetUidFunctionDecl,
-                                                  SelExprs, StartLoc, EndLoc);
+                                                  &SelExprs[0], SelExprs.size(),
+                                                  StartLoc, EndLoc);
   MsgExprs.push_back(SelExp);
   
   // User provided sub-expression is the 3rd, and last, argument.
@@ -2786,7 +2788,9 @@ Stmt *RewriteModernObjC::RewriteObjCArrayLiteralExpr(ObjCArrayLiteral *Exp) {
   
   IdentifierInfo *clsName = Class->getIdentifier();
   ClsExprs.push_back(getStringLiteral(clsName->getName()));
-  CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl, ClsExprs,
+  CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl,
+                                               &ClsExprs[0],
+                                               ClsExprs.size(), 
                                                StartLoc, EndLoc);
   MsgExprs.push_back(Cls);
   
@@ -2797,7 +2801,8 @@ Stmt *RewriteModernObjC::RewriteObjCArrayLiteralExpr(ObjCArrayLiteral *Exp) {
   SelExprs.push_back(
       getStringLiteral(ArrayMethod->getSelector().getAsString()));
   CallExpr *SelExp = SynthesizeCallToFunctionDecl(SelGetUidFunctionDecl,
-                                                  SelExprs, StartLoc, EndLoc);
+                                                  &SelExprs[0], SelExprs.size(),
+                                                  StartLoc, EndLoc);
   MsgExprs.push_back(SelExp);
   
   // (const id [])objects
@@ -2934,7 +2939,9 @@ Stmt *RewriteModernObjC::RewriteObjCDictionaryLiteralExpr(ObjCDictionaryLiteral 
   
   IdentifierInfo *clsName = Class->getIdentifier();
   ClsExprs.push_back(getStringLiteral(clsName->getName()));
-  CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl, ClsExprs,
+  CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl,
+                                               &ClsExprs[0],
+                                               ClsExprs.size(), 
                                                StartLoc, EndLoc);
   MsgExprs.push_back(Cls);
   
@@ -2944,7 +2951,8 @@ Stmt *RewriteModernObjC::RewriteObjCDictionaryLiteralExpr(ObjCDictionaryLiteral 
   ObjCMethodDecl *DictMethod = Exp->getDictWithObjectsMethod();
   SelExprs.push_back(getStringLiteral(DictMethod->getSelector().getAsString()));
   CallExpr *SelExp = SynthesizeCallToFunctionDecl(SelGetUidFunctionDecl,
-                                                  SelExprs, StartLoc, EndLoc);
+                                                  &SelExprs[0], SelExprs.size(),
+                                                  StartLoc, EndLoc);
   MsgExprs.push_back(SelExp);
   
   // (const id [])objects
@@ -3290,10 +3298,14 @@ Stmt *RewriteModernObjC::SynthMessageExpr(ObjCMessageExpr *Exp,
     ClsExprs.push_back(getStringLiteral(ClassDecl->getIdentifier()->getName()));
     // (Class)objc_getClass("CurrentClass")
     CallExpr *Cls = SynthesizeCallToFunctionDecl(GetMetaClassFunctionDecl,
-                                                 ClsExprs, StartLoc, EndLoc);
+                                                 &ClsExprs[0],
+                                                 ClsExprs.size(),
+                                                 StartLoc,
+                                                 EndLoc);
     ClsExprs.clear();
     ClsExprs.push_back(Cls);
-    Cls = SynthesizeCallToFunctionDecl(GetSuperClassFunctionDecl, ClsExprs,
+    Cls = SynthesizeCallToFunctionDecl(GetSuperClassFunctionDecl,
+                                       &ClsExprs[0], ClsExprs.size(),
                                        StartLoc, EndLoc);
     
     // (id)class_getSuperclass((Class)objc_getClass("CurrentClass"))
@@ -3354,7 +3366,9 @@ Stmt *RewriteModernObjC::SynthMessageExpr(ObjCMessageExpr *Exp,
       = Exp->getClassReceiver()->getAs<ObjCObjectType>()->getInterface();
     IdentifierInfo *clsName = Class->getIdentifier();
     ClsExprs.push_back(getStringLiteral(clsName->getName()));
-    CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl, ClsExprs,
+    CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl,
+                                                 &ClsExprs[0],
+                                                 ClsExprs.size(), 
                                                  StartLoc, EndLoc);
     CastExpr *ArgExpr = NoTypeInfoCStyleCastExpr(Context,
                                                  Context->getObjCIdType(),
@@ -3384,11 +3398,14 @@ Stmt *RewriteModernObjC::SynthMessageExpr(ObjCMessageExpr *Exp,
     SmallVector<Expr*, 8> ClsExprs;
     ClsExprs.push_back(getStringLiteral(ClassDecl->getIdentifier()->getName()));
     // (Class)objc_getClass("CurrentClass")
-    CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl, ClsExprs,
+    CallExpr *Cls = SynthesizeCallToFunctionDecl(GetClassFunctionDecl,
+                                                 &ClsExprs[0],
+                                                 ClsExprs.size(), 
                                                  StartLoc, EndLoc);
     ClsExprs.clear();
     ClsExprs.push_back(Cls);
-    Cls = SynthesizeCallToFunctionDecl(GetSuperClassFunctionDecl, ClsExprs,
+    Cls = SynthesizeCallToFunctionDecl(GetSuperClassFunctionDecl,
+                                       &ClsExprs[0], ClsExprs.size(),
                                        StartLoc, EndLoc);
     
     // (id)class_getSuperclass((Class)objc_getClass("CurrentClass"))
@@ -3459,7 +3476,9 @@ Stmt *RewriteModernObjC::SynthMessageExpr(ObjCMessageExpr *Exp,
   SmallVector<Expr*, 8> SelExprs;
   SelExprs.push_back(getStringLiteral(Exp->getSelector().getAsString()));
   CallExpr *SelExp = SynthesizeCallToFunctionDecl(SelGetUidFunctionDecl,
-                                                  SelExprs, StartLoc, EndLoc);
+                                                 &SelExprs[0], SelExprs.size(),
+                                                  StartLoc,
+                                                  EndLoc);
   MsgExprs.push_back(SelExp);
 
   // Now push any user supplied arguments.
@@ -4843,7 +4862,7 @@ void RewriteModernObjC::RewriteImplicitCastObjCExpr(CastExpr *IC) {
   std::string Str = "(";
   Str += TypeString;
   Str += ")";
-  InsertText(IC->getSubExpr()->getLocStart(), Str);
+  InsertText(IC->getSubExpr()->getLocStart(), &Str[0], Str.size());
 
   return;
 }
@@ -5622,7 +5641,7 @@ Stmt *RewriteModernObjC::RewriteFunctionBodyOrGlobalInitializer(Stmt *S) {
 
     // FIXME: Missing definition of
     // InsertText(clang::SourceLocation, char const*, unsigned int).
-    // InsertText(startLoc, messString);
+    // InsertText(startLoc, messString.c_str(), messString.size());
     // Tried this, but it didn't work either...
     // ReplaceText(startLoc, 0, messString.c_str(), messString.size());
 #endif
@@ -5748,7 +5767,7 @@ Stmt *RewriteModernObjC::RewriteFunctionBodyOrGlobalInitializer(Stmt *S) {
     const std::string &Str = Buf.str();
 
     printf("CAST = %s\n", &Str[0]);
-    InsertText(ICE->getSubExpr()->getLocStart(), Str);
+    InsertText(ICE->getSubExpr()->getLocStart(), &Str[0], Str.size());
     delete S;
     return Replacement;
   }

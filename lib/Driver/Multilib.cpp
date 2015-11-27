@@ -260,15 +260,16 @@ bool MultilibSet::select(const Multilib::flags_list &Flags, Multilib &M) const {
     return false;
   }, Multilibs);
 
-  if (Filtered.size() == 0)
+  if (Filtered.size() == 0) {
     return false;
-  if (Filtered.size() == 1) {
+  } else if (Filtered.size() == 1) {
     M = Filtered[0];
     return true;
   }
 
   // TODO: pick the "best" multlib when more than one is suitable
   assert(false);
+
   return false;
 }
 

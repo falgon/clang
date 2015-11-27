@@ -38,17 +38,18 @@ public:
       : DiagOpts(new DiagnosticOptions()),
         Diagnostics(new DiagnosticsEngine(new DiagnosticIDs,
                                           DiagOpts.get())),
-        InMemoryFileSystem(new vfs::InMemoryFileSystem),
-        Files(FileSystemOptions(), InMemoryFileSystem),
+        Files((FileSystemOptions())),
         Sources(*Diagnostics, Files),
         Rewrite(Sources, Options) {
     Diagnostics->setClient(new IgnoringDiagConsumer, true);
   }
 
   FileID createInMemoryFile(StringRef Name, StringRef Content) {
-    InMemoryFileSystem->addFile(Name, 0,
-                                llvm::MemoryBuffer::getMemBuffer(Content));
-    const FileEntry *Entry = Files.getFile(Name);
+    std::unique_ptr<llvm::MemoryBuffer> Source =
+        llvm::MemoryBuffer::getMemBuffer(Content);
+    const FileEntry *Entry =
+        Files.getVirtualFile(Name, Source->getBufferSize(), 0);
+    Sources.overrideFileContents(Entry, std::move(Source));
     assert(Entry != nullptr);
     return Sources.createFileID(Entry, SourceLocation(), SrcMgr::C_User);
   }
@@ -63,7 +64,6 @@ public:
 
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts;
   IntrusiveRefCntPtr<DiagnosticsEngine> Diagnostics;
-  IntrusiveRefCntPtr<vfs::InMemoryFileSystem> InMemoryFileSystem;
   FileManager Files;
   SourceManager Sources;
   Rewriter Rewrite;

@@ -298,11 +298,6 @@ int main(int argc, char **argv) {
   {
     foo();
   }
-  static int r;
-#pragma omp parallel sections firstprivate(r) // OK
-  {
-    foo();
-  }
 
   return foomain<S4, S5>(argc, argv); // expected-note {{in instantiation of function template specialization 'foomain<S4, S5>' requested here}}
 }

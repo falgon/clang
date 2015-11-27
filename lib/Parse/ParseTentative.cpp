@@ -15,6 +15,9 @@
 #include "clang/Parse/Parser.h"
 #include "clang/Parse/ParseDiagnostic.h"
 #include "clang/Sema/ParsedTemplate.h"
+//@@
+#include "RAIIObjectsForParser.h"
+//@@
 using namespace clang;
 
 /// isCXXDeclarationStatement - C++-specialized function that disambiguates
@@ -196,15 +199,31 @@ Parser::TPResult Parser::TryConsumeDeclarationSpecifier() {
     }
 
     if (Tok.isOneOf(tok::identifier, tok::coloncolon, tok::kw_decltype,
-                    tok::annot_template_id) &&
+                    tok::annot_template_id/*@@*/,
+					tok::periodtilde, tok::periodexclaim/*@@*/) &&
         TryAnnotateCXXScopeToken())
       return TPResult::Error;
     if (Tok.is(tok::annot_cxxscope))
       ConsumeToken();
-    if (Tok.isNot(tok::identifier) && Tok.isNot(tok::annot_template_id))
+//@@
+    if (Tok.is(tok::identifier) || Tok.is(tok::annot_template_id))
+      ConsumeToken();
+	else if (!Tok.isOneOf(tok::periodtilde, tok::periodexclaim) || 
+             TryParseMetaGeneratedExpr() != TPResult::True)
       return TPResult::Error;
-    ConsumeToken();
+//@@was:
+    //if (Tok.isNot(tok::identifier) && Tok.isNot(tok::annot_template_id))
+    //  return TPResult::Error;
+    //ConsumeToken();
     break;
+
+//@@
+  case tok::periodtilde:
+  case tok::periodexclaim:
+    if (TryParseMetaGeneratedExpr() != TPResult::True)
+      return TPResult::Error;
+    break;
+//@@
 
   case tok::annot_cxxscope:
     ConsumeToken();
@@ -623,7 +642,8 @@ Parser::isCXX11AttributeSpecifier(bool Disambiguate,
 
 Parser::TPResult Parser::TryParsePtrOperatorSeq() {
   while (true) {
-    if (Tok.isOneOf(tok::coloncolon, tok::identifier))
+    if (Tok.isOneOf(tok::coloncolon, tok::identifier/*@@*/,
+					tok::periodtilde, tok::periodexclaim/*@@*/))
       if (TryAnnotateCXXScopeToken(true))
         return TPResult::Error;
 
@@ -712,6 +732,10 @@ Parser::TPResult Parser::TryParseOperatorId() {
       if (Tok.is(tok::identifier))
         ConsumeToken();
       else
+//@@
+           if (!Tok.isOneOf(tok::periodtilde, tok::periodexclaim) || 
+             TryParseMetaGeneratedExpr() != TPResult::True)
+//@@
         return TPResult::Error;
     }
     return TPResult::True;
@@ -801,19 +825,26 @@ Parser::TPResult Parser::TryParseDeclarator(bool mayBeAbstract,
   if (Tok.is(tok::ellipsis))
     ConsumeToken();
 
-  if ((Tok.isOneOf(tok::identifier, tok::kw_operator) ||
-       (Tok.is(tok::annot_cxxscope) && (NextToken().is(tok::identifier) ||
+  if ((Tok.isOneOf(tok::identifier, tok::kw_operator
+	  /*@@*/, tok::periodtilde, tok::periodexclaim/*@@*/) ||
+       (Tok.is(tok::annot_cxxscope) && (NextToken().isIdentifier(/*@@was:tok::identifier*/) ||
                                         NextToken().is(tok::kw_operator)))) &&
       mayHaveIdentifier) {
     // declarator-id
     if (Tok.is(tok::annot_cxxscope))
       ConsumeToken();
-    else if (Tok.is(tok::identifier))
+    else if (Tok.is(tok::identifier))	//@@ don't do this for meta-generated ids
       TentativelyDeclaredIdentifiers.push_back(Tok.getIdentifierInfo());
     if (Tok.is(tok::kw_operator)) {
       if (TryParseOperatorId() == TPResult::Error)
         return TPResult::Error;
     } else
+//@@
+           if (Tok.isOneOf(tok::periodtilde, tok::periodexclaim) &&
+               TryParseMetaGeneratedExpr() != TPResult::True)
+             return TPResult::Error;
+      else
+//@@
       ConsumeToken();
   } else if (Tok.is(tok::l_paren)) {
     ConsumeParen();
@@ -1009,7 +1040,8 @@ public:
   TentativeParseCCC(const Token &Next) {
     WantRemainingKeywords = false;
     WantTypeSpecifiers = Next.isOneOf(tok::l_paren, tok::r_paren, tok::greater,
-                                      tok::l_brace, tok::identifier);
+                                      tok::l_brace, tok::identifier
+									  /*@@*/, tok::periodtilde, tok::periodexclaim/*@@*/);
   }
 
   bool ValidateCandidate(const TypoCorrection &Candidate) override {
@@ -1089,7 +1121,6 @@ public:
 /// [GNU]     typeof-specifier
 /// [GNU]     '_Complex'
 /// [C++11]   'auto'
-/// [GNU]     '__auto_type'
 /// [C++11]   'decltype' ( expression )
 /// [C++1y]   'decltype' ( 'auto' )
 ///
@@ -1142,7 +1173,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
 
     const Token &Next = NextToken();
     // In 'foo bar', 'foo' is always a type name outside of Objective-C.
-    if (!getLangOpts().ObjC1 && Next.is(tok::identifier))
+    if (!getLangOpts().ObjC1 && Next.isIdentifier(/*@@was:tok::identifier*/))
       return TPResult::True;
 
     if (Next.isNot(tok::coloncolon) && Next.isNot(tok::less)) {
@@ -1165,7 +1196,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
       case ANK_Success:
         break;
       }
-      assert(Tok.isNot(tok::identifier) &&
+      assert(!Tok.isIdentifier() && //@@was:Tok.isNot(tok::identifier) &&
              "TryAnnotateName succeeded without producing an annotation");
     } else {
       // This might possibly be a type with a dependent scope specifier and
@@ -1177,7 +1208,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
       // If annotation failed, assume it's a non-type.
       // FIXME: If this happens due to an undeclared identifier, treat it as
       // ambiguous.
-      if (Tok.is(tok::identifier))
+      if (Tok.isIdentifier(/*@@was:tok::identifier*/))
         return TPResult::False;
     }
 
@@ -1185,6 +1216,27 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
     return isCXXDeclarationSpecifier(BracedCastResult, HasMissingTypename);
   }
 
+//@@
+  case tok::periodtilde:
+  case tok::periodexclaim: {
+	TPResult result = HasMissingTypename ? TPResult::Ambiguous : TPResult::False;
+    TentativeParsingAction TPA(*this);
+	if (TryParseMetaGeneratedExpr() == TPResult::True) {
+      if (Tok.isIdentifier())
+        result = TPResult::True;
+	  else if (Tok.isOneOf(tok::coloncolon, tok::less)) {
+        if (TryAnnotateTypeOrScopeToken())
+          result = TPResult::Error;
+        else if (Tok.isIdentifier())
+          result = TPResult::False;
+        else
+          result = isCXXDeclarationSpecifier(BracedCastResult, HasMissingTypename);
+	  }
+	}
+	TPA.Revert();
+	return result;
+  }
+//@@
   case tok::kw_typename:  // typename T::type
     // Annotate typenames and C++ scope specifiers.  If we get one, just
     // recurse to handle whatever we get.
@@ -1263,7 +1315,6 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
   case tok::kw_restrict:
   case tok::kw__Complex:
   case tok::kw___attribute:
-  case tok::kw___auto_type:
     return TPResult::True;
 
     // Microsoft
@@ -1296,7 +1347,11 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
 
   case tok::annot_template_id: {
     TemplateIdAnnotation *TemplateId = takeTemplateIdAnnotation(Tok);
-    if (TemplateId->Kind != TNK_Type_template)
+    if (TemplateId->Kind != TNK_Type_template
+//@@
+		&& TemplateId->Kind != TNK_Dependent_template_name 
+//@@
+    )
       return TPResult::False;
     CXXScopeSpec SS;
     AnnotateTemplateIdTokenAsType();
@@ -1311,7 +1366,7 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
     if (!Tok.is(tok::annot_typename)) {
       // If the next token is an identifier or a type qualifier, then this
       // can't possibly be a valid expression either.
-      if (Tok.is(tok::annot_cxxscope) && NextToken().is(tok::identifier)) {
+      if (Tok.is(tok::annot_cxxscope) && NextToken().isIdentifier(/*@@was:tok::identifier*/)) {
         CXXScopeSpec SS;
         Actions.RestoreNestedNameSpecifierAnnotation(Tok.getAnnotationValue(),
                                                      Tok.getAnnotationRange(),
@@ -1319,8 +1374,14 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
         if (SS.getScopeRep() && SS.getScopeRep()->isDependent()) {
           TentativeParsingAction PA(*this);
           ConsumeToken();
-          ConsumeToken();
-          bool isIdentifier = Tok.is(tok::identifier);
+//@@
+          if (Tok.is(tok::identifier))
+            ConsumeToken();
+          else if (TryParseMetaGeneratedExpr() != TPResult::True)
+            return TPResult::Error;
+//@@was:          ConsumeToken();
+//@@
+          bool isIdentifier = Tok.isIdentifier(/*@@wasLtok::identifier*/);
           TPResult TPR = TPResult::False;
           if (!isIdentifier)
             TPR = isCXXDeclarationSpecifier(BracedCastResult,
@@ -1338,6 +1399,12 @@ Parser::isCXXDeclarationSpecifier(Parser::TPResult BracedCastResult,
             return TPResult::Ambiguous;
           }
         } else {
+//@@
+          if (Tok.isOneOf(tok::periodtilde, tok::periodexclaim))
+            return HasMissingTypename ? TPResult::Ambiguous
+                                      : TPResult::False;
+		  else
+//@@
           // Try to resolve the name. If it doesn't exist, assume it was
           // intended to name a type and keep disambiguating.
           switch (TryAnnotateName(false /* SS is not dependent */)) {
@@ -1517,7 +1584,6 @@ bool Parser::isCXXDeclarationSpecifierAType() {
   case tok::kw_double:
   case tok::kw_void:
   case tok::kw___unknown_anytype:
-  case tok::kw___auto_type:
     return true;
 
   case tok::kw_auto:
@@ -1692,7 +1758,7 @@ Parser::TryParseParameterDeclarationClause(bool *InvalidAsDeclaration,
           return TPResult::Error;
 
         // If we see a parameter name, this can't be a template argument.
-        if (SeenType && Tok.is(tok::identifier))
+        if (SeenType && Tok.isIdentifier(/*@@was:tok::identifier*/))
           return TPResult::True;
 
         TPR = isCXXDeclarationSpecifier(TPResult::False,
@@ -1823,3 +1889,35 @@ Parser::TPResult Parser::TryParseBracketDeclarator() {
 
   return TPResult::Ambiguous;
 }
+
+//@@
+Parser::TPResult Parser::TryParseMetaGeneratedExpr() {
+  assert(Tok.isOneOf(tok::periodtilde, tok::periodexclaim) &&
+    "Not a meta-generated expr");
+  ConsumeToken();
+  if (Tok.isOneOf(tok::identifier, tok::annot_primary_expr)) {
+	ConsumeToken();
+    return TPResult::True;
+  }
+  else if (Tok.isNot(tok::l_paren))
+    return TPResult::Error;
+  else {
+    for (unsigned count = 0; true; ConsumeAnyToken())
+      if (Tok.is(tok::eof))
+        return TPResult::Error;
+      else if (Tok.is(tok::l_paren))
+        ++count;
+      else if(Tok.is(tok::r_paren) && !--count) {
+        ConsumeAnyToken();
+        return TPResult::True;
+	  }
+  }
+}
+
+bool Parser::IsMetaGeneratedDecl() {
+  assert(Tok.isOneOf(tok::periodtilde, tok::periodexclaim) &&
+    "Not a meta-generated declaration");
+  TPResult TPR = TryParseMetaGeneratedExpr();
+  return TPR == TPResult::True && Tok.is(tok::semi);
+}
+//@@

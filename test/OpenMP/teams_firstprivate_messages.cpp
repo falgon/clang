@@ -127,10 +127,6 @@ int main(int argc, char **argv) {
 #pragma omp target
 #pragma omp teams firstprivate(j)
   foo();
-  static int m;
-#pragma omp target
-#pragma omp teams firstprivate(m) // OK
-  foo();
 
   return 0;
 }

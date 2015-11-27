@@ -8,8 +8,6 @@
 @end
 
 void f(int (^bl)(B* b));
-void takeBlock(void (^block)());
-void useValues(...);
 
 // Test1
 void g() {
@@ -61,10 +59,3 @@ void gun() {
     return foovar;
   };
 }
-
-// PR24780
-class CaptureThisAndAnotherPointer {
-  void test(void *ptr) {
-    takeBlock(^{ useValues(ptr, this); });
-  }
-};

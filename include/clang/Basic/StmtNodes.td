@@ -48,9 +48,10 @@ def CXXCatchStmt : Stmt;
 def CXXTryStmt : Stmt;
 def CXXForRangeStmt : Stmt;
 
-// C++ Coroutines TS statements
-def CoroutineBodyStmt : Stmt;
-def CoreturnStmt : Stmt;
+//@@
+// MetaCPP statements
+def ExecuteStmt : Stmt;
+//@@
 
 // Expressions
 def Expr : Stmt<1>;
@@ -89,6 +90,11 @@ def ParenListExpr : DStmt<Expr>;
 def VAArgExpr : DStmt<Expr>;
 def GenericSelectionExpr : DStmt<Expr>;
 def PseudoObjectExpr : DStmt<Expr>;
+
+//@@
+// MetaCPP expressions
+def QuasiQuoteExpr : DStmt<Expr>;
+//@@
 
 // Atomic expressions
 def AtomicExpr : DStmt<Expr>;
@@ -144,11 +150,6 @@ def MaterializeTemporaryExpr : DStmt<Expr>;
 def LambdaExpr : DStmt<Expr>;
 def CXXFoldExpr : DStmt<Expr>;
 
-// C++ Coroutines TS expressions
-def CoroutineSuspendExpr : DStmt<Expr, 1>;
-def CoawaitExpr : DStmt<CoroutineSuspendExpr>;
-def CoyieldExpr : DStmt<CoroutineSuspendExpr>;
-
 // Obj-C Expressions.
 def ObjCStringLiteral : DStmt<Expr>;
 def ObjCBoxedExpr : DStmt<Expr>;
@@ -180,7 +181,6 @@ def TypoExpr : DStmt<Expr>;
 
 // Microsoft Extensions.
 def MSPropertyRefExpr : DStmt<Expr>;
-def MSPropertySubscriptExpr : DStmt<Expr>;
 def CXXUuidofExpr : DStmt<Expr>; 
 def SEHTryStmt : Stmt;
 def SEHExceptStmt : Stmt;

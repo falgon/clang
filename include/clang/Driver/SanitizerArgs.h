@@ -27,14 +27,13 @@ class SanitizerArgs {
   SanitizerSet TrapSanitizers;
 
   std::vector<std::string> BlacklistFiles;
-  std::vector<std::string> ExtraDeps;
   int CoverageFeatures;
   int MsanTrackOrigins;
   bool MsanUseAfterDtor;
   int AsanFieldPadding;
+  bool AsanZeroBaseShadow;
   bool AsanSharedRuntime;
   bool LinkCXXRuntimes;
-  bool NeedPIE;
 
  public:
   /// Parses the sanitizer arguments from an argument list.

@@ -45,10 +45,10 @@ typedef struct
 } StructS2;
 
 uint32_t g(uint32_t *s, StructA *A, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z1g
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32:!.*]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH-LABEL: define i32 @_Z1g
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32:!.*]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_A_f32:!.*]]
   *s = 1;
@@ -57,22 +57,22 @@ uint32_t g(uint32_t *s, StructA *A, uint64_t count) {
 }
 
 uint32_t g2(uint32_t *s, StructA *A, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z2g2
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// CHECK: store i16 4, i16* %{{.*}}, align 4, !tbaa [[TAG_i16:!.*]]
-// PATH-LABEL: define i32 @_Z2g2
+// CHECK: store i16 4, i16* %{{.*}}, align 2, !tbaa [[TAG_i16:!.*]]
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH: store i16 4, i16* %{{.*}}, align 4, !tbaa [[TAG_A_f16:!.*]]
+// PATH: store i16 4, i16* %{{.*}}, align 2, !tbaa [[TAG_A_f16:!.*]]
   *s = 1;
   A->f16 = 4;
   return *s;
 }
 
 uint32_t g3(StructA *A, StructB *B, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z2g3
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH-LABEL: define i32 @_Z2g3
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_A_f32]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_B_a_f32:!.*]]
   A->f32 = 1;
@@ -81,22 +81,22 @@ uint32_t g3(StructA *A, StructB *B, uint64_t count) {
 }
 
 uint32_t g4(StructA *A, StructB *B, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z2g4
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// CHECK: store i16 4, i16* %{{.*}}, align 4, !tbaa [[TAG_i16]]
-// PATH-LABEL: define i32 @_Z2g4
+// CHECK: store i16 4, i16* %{{.*}}, align 2, !tbaa [[TAG_i16]]
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_A_f32]]
-// PATH: store i16 4, i16* %{{.*}}, align 4, !tbaa [[TAG_B_a_f16:!.*]]
+// PATH: store i16 4, i16* %{{.*}}, align 2, !tbaa [[TAG_B_a_f16:!.*]]
   A->f32 = 1;
   B->a.f16 = 4;
   return A->f32;
 }
 
 uint32_t g5(StructA *A, StructB *B, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z2g5
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH-LABEL: define i32 @_Z2g5
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_A_f32]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_B_f32:!.*]]
   A->f32 = 1;
@@ -105,10 +105,10 @@ uint32_t g5(StructA *A, StructB *B, uint64_t count) {
 }
 
 uint32_t g6(StructA *A, StructB *B, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z2g6
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH-LABEL: define i32 @_Z2g6
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_A_f32]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_B_a_f32_2:!.*]]
   A->f32 = 1;
@@ -117,10 +117,10 @@ uint32_t g6(StructA *A, StructB *B, uint64_t count) {
 }
 
 uint32_t g7(StructA *A, StructS *S, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z2g7
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH-LABEL: define i32 @_Z2g7
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_A_f32]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_S_f32:!.*]]
   A->f32 = 1;
@@ -129,22 +129,22 @@ uint32_t g7(StructA *A, StructS *S, uint64_t count) {
 }
 
 uint32_t g8(StructA *A, StructS *S, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z2g8
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// CHECK: store i16 4, i16* %{{.*}}, align 4, !tbaa [[TAG_i16]]
-// PATH-LABEL: define i32 @_Z2g8
+// CHECK: store i16 4, i16* %{{.*}}, align 2, !tbaa [[TAG_i16]]
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_A_f32]]
-// PATH: store i16 4, i16* %{{.*}}, align 4, !tbaa [[TAG_S_f16:!.*]]
+// PATH: store i16 4, i16* %{{.*}}, align 2, !tbaa [[TAG_S_f16:!.*]]
   A->f32 = 1;
   S->f16 = 4;
   return A->f32;
 }
 
 uint32_t g9(StructS *S, StructS2 *S2, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z2g9
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH-LABEL: define i32 @_Z2g9
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_S_f32]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_S2_f32:!.*]]
   S->f32 = 1;
@@ -153,22 +153,22 @@ uint32_t g9(StructS *S, StructS2 *S2, uint64_t count) {
 }
 
 uint32_t g10(StructS *S, StructS2 *S2, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z3g10
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// CHECK: store i16 4, i16* %{{.*}}, align 4, !tbaa [[TAG_i16]]
-// PATH-LABEL: define i32 @_Z3g10
+// CHECK: store i16 4, i16* %{{.*}}, align 2, !tbaa [[TAG_i16]]
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_S_f32]]
-// PATH: store i16 4, i16* %{{.*}}, align 4, !tbaa [[TAG_S2_f16:!.*]]
+// PATH: store i16 4, i16* %{{.*}}, align 2, !tbaa [[TAG_S2_f16:!.*]]
   S->f32 = 1;
   S2->f16 = 4;
   return S->f32;
 }
 
 uint32_t g11(StructC *C, StructD *D, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z3g11
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH-LABEL: define i32 @_Z3g11
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_C_b_a_f32:!.*]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_D_b_a_f32:!.*]]
   C->b.a.f32 = 1;
@@ -177,11 +177,11 @@ uint32_t g11(StructC *C, StructD *D, uint64_t count) {
 }
 
 uint32_t g12(StructC *C, StructD *D, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z3g12
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // TODO: differentiate the two accesses.
-// PATH-LABEL: define i32 @_Z3g12
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_B_a_f32]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_B_a_f32]]
   StructB *b1 = &(C->b);
@@ -202,9 +202,9 @@ struct five {
 } ATTR;
 char g13(struct five *a, struct five *b) {
   return a->b;
-// CHECK-LABEL: define signext i8 @_Z3g13
+// CHECK: define signext i8 @{{.*}}(
 // CHECK: load i8, i8* %{{.*}}, align 1, !tbaa [[TAG_char:!.*]]
-// PATH-LABEL: define signext i8 @_Z3g13
+// PATH: define signext i8 @{{.*}}(
 // PATH: load i8, i8* %{{.*}}, align 1, !tbaa [[TAG_five_b:!.*]]
 }
 
@@ -215,9 +215,9 @@ struct six {
   char c;
 };
 char g14(struct six *a, struct six *b) {
-// CHECK-LABEL: define signext i8 @_Z3g14
+// CHECK: define signext i8 @{{.*}}(
 // CHECK: load i8, i8* %{{.*}}, align 1, !tbaa [[TAG_char]]
-// PATH-LABEL: define signext i8 @_Z3g14
+// PATH: define signext i8 @{{.*}}(
 // PATH: load i8, i8* %{{.*}}, align 1, !tbaa [[TAG_six_b:!.*]]
   return a->b;
 }
@@ -225,10 +225,10 @@ char g14(struct six *a, struct six *b) {
 // Types that differ only by name may alias.
 typedef StructS StructS3;
 uint32_t g15(StructS *S, StructS3 *S3, uint64_t count) {
-// CHECK-LABEL: define i32 @_Z3g15
+// CHECK: define i32 @{{.*}}(
 // CHECK: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
 // CHECK: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_i32]]
-// PATH-LABEL: define i32 @_Z3g15
+// PATH: define i32 @{{.*}}(
 // PATH: store i32 1, i32* %{{.*}}, align 4, !tbaa [[TAG_S_f32]]
 // PATH: store i32 4, i32* %{{.*}}, align 4, !tbaa [[TAG_S_f32]]
   S->f32 = 1;

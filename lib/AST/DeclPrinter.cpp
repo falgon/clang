@@ -60,6 +60,13 @@ namespace {
     void VisitEnumDecl(EnumDecl *D);
     void VisitRecordDecl(RecordDecl *D);
     void VisitEnumConstantDecl(EnumConstantDecl *D);
+//@@
+	void VisitEscapeDecl(EscapeDecl *D);
+	void VisitInlineDecl(InlineDecl *D);
+	void VisitExecuteDecl(ExecuteDecl *D);
+	void VisitDefDecl(DefDecl *D);
+	void VisitPreprocessorDirectiveDecl(PreprocessorDirectiveDecl *D);
+//@@
     void VisitEmptyDecl(EmptyDecl *D);
     void VisitFunctionDecl(FunctionDecl *D);
     void VisitFriendDecl(FriendDecl *D);
@@ -96,8 +103,9 @@ namespace {
     void PrintTemplateParameters(const TemplateParameterList *Params,
                                  const TemplateArgumentList *Args = nullptr);
     void prettyPrintAttributes(Decl *D);
-    void prettyPrintPragmas(Decl *D);
     void printDeclType(QualType T, StringRef DeclName, bool Pack = false);
+
+	static bool needSemiAfterDecl(Decl *D);
   };
 }
 
@@ -110,6 +118,10 @@ void Decl::print(raw_ostream &Out, const PrintingPolicy &Policy,
                  unsigned Indentation, bool PrintInstantiation) const {
   DeclPrinter Printer(Out, Policy, Indentation, PrintInstantiation);
   Printer.Visit(const_cast<Decl*>(this));
+}
+
+bool Decl::needsTrailingSemi() const {
+  return DeclPrinter::needSemiAfterDecl(const_cast<Decl*>(this));
 }
 
 static QualType GetBaseType(QualType T) {
@@ -178,6 +190,14 @@ void Decl::printGroup(Decl** Begin, unsigned NumDecls,
   }
 }
 
+//@@
+void DeclContext::printDeclContext(raw_ostream &Out, const PrintingPolicy &Policy,
+             unsigned Indentation, bool PrintInstantiation) const {
+  DeclPrinter Printer(Out, Policy, Indentation, PrintInstantiation);
+  Printer.VisitDeclContext(const_cast<DeclContext *>(this), /*Indent=*/false);
+}
+//@@
+
 LLVM_DUMP_METHOD void DeclContext::dumpDeclContext() const {
   // Get the translation unit
   const DeclContext *DC = this;
@@ -198,40 +218,12 @@ raw_ostream& DeclPrinter::Indent(unsigned Indentation) {
 void DeclPrinter::prettyPrintAttributes(Decl *D) {
   if (Policy.PolishForDeclaration)
     return;
-
+  
   if (D->hasAttrs()) {
     AttrVec &Attrs = D->getAttrs();
-    for (auto *A : Attrs) {
-      switch (A->getKind()) {
-#define ATTR(X)
-#define PRAGMA_SPELLING_ATTR(X) case attr::X:
-#include "clang/Basic/AttrList.inc"
-        break;
-      default:
-        A->printPretty(Out, Policy);
-        break;
-      }
-    }
-  }
-}
-
-void DeclPrinter::prettyPrintPragmas(Decl *D) {
-  if (Policy.PolishForDeclaration)
-    return;
-
-  if (D->hasAttrs()) {
-    AttrVec &Attrs = D->getAttrs();
-    for (auto *A : Attrs) {
-      switch (A->getKind()) {
-#define ATTR(X)
-#define PRAGMA_SPELLING_ATTR(X) case attr::X:
-#include "clang/Basic/AttrList.inc"
-        A->printPretty(Out, Policy);
-        Indent();
-        break;
-      default:
-        break;
-      }
+    for (AttrVec::const_iterator i=Attrs.begin(), e=Attrs.end(); i!=e; ++i) {
+      Attr *A = *i;
+      A->printPretty(Out, Policy);
     }
   }
 }
@@ -263,6 +255,24 @@ void DeclPrinter::Print(AccessSpecifier AS) {
   case AS_private:   Out << "private"; break;
   }
 }
+
+//@@
+bool DeclPrinter::needSemiAfterDecl(Decl *D) {
+  bool noSemiNeeded =	isa<OMPThreadPrivateDecl>(D) ||
+						isa<FunctionDecl>(D) && cast<FunctionDecl>(D)->isThisDeclarationADefinition() ||
+						isa<FunctionTemplateDecl>(D) && cast<FunctionTemplateDecl>(D)->isThisDeclarationADefinition() ||	//@@extra
+						isa<PreprocessorDirectiveDecl>(D) ||																//@@extra
+						isa<ObjCMethodDecl>(D) && cast<ObjCMethodDecl>(D)->getBody() ||
+						isa<NamespaceDecl>(D) ||
+						//@@ this seems wrong, TODO:check if something else creates this problem isa<LinkageSpecDecl>(*D) ||
+						isa<ObjCImplementationDecl>(D) ||
+						isa<ObjCInterfaceDecl>(D) ||
+						isa<ObjCProtocolDecl>(D) ||
+						isa<ObjCCategoryImplDecl>(D) ||
+						isa<ObjCCategoryDecl>(D);
+  return !noSemiNeeded;
+}
+//@@
 
 //----------------------------------------------------------------------------
 // Common C declarations
@@ -320,41 +330,38 @@ void DeclPrinter::VisitDeclContext(DeclContext *DC, bool Indent) {
     }
 
     if (isa<AccessSpecDecl>(*D)) {
+//@@
+      bool changeIndentation = Indentation >= Policy.Indentation;
+	  if (changeIndentation)
+//@@
       Indentation -= Policy.Indentation;
       this->Indent();
       Print(D->getAccess());
       Out << ":\n";
+//@@
+      if (changeIndentation)
+//@@
       Indentation += Policy.Indentation;
       continue;
     }
 
     this->Indent();
     Visit(*D);
-
+//@@
+	if (isa<DefDecl>(*D) || isa<ExecuteDecl>(*D))
+		continue;
+//@@
     // FIXME: Need to be able to tell the DeclPrinter when
     const char *Terminator = nullptr;
-    if (isa<OMPThreadPrivateDecl>(*D))
-      Terminator = nullptr;
-    else if (isa<FunctionDecl>(*D) &&
-             cast<FunctionDecl>(*D)->isThisDeclarationADefinition())
-      Terminator = nullptr;
-    else if (isa<ObjCMethodDecl>(*D) && cast<ObjCMethodDecl>(*D)->getBody())
-      Terminator = nullptr;
-    else if (isa<NamespaceDecl>(*D) || isa<LinkageSpecDecl>(*D) ||
-             isa<ObjCImplementationDecl>(*D) ||
-             isa<ObjCInterfaceDecl>(*D) ||
-             isa<ObjCProtocolDecl>(*D) ||
-             isa<ObjCCategoryImplDecl>(*D) ||
-             isa<ObjCCategoryDecl>(*D))
-      Terminator = nullptr;
-    else if (isa<EnumConstantDecl>(*D)) {
+//@@
+	if (isa<EnumConstantDecl>(*D)) {
       DeclContext::decl_iterator Next = D;
       ++Next;
       if (Next != DEnd)
         Terminator = ",";
-    } else
+    } else if (needSemiAfterDecl(*D))
       Terminator = ";";
-
+//@@
     if (Terminator)
       Out << Terminator;
     Out << "\n";
@@ -437,10 +444,6 @@ void DeclPrinter::VisitEnumConstantDecl(EnumConstantDecl *D) {
 }
 
 void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
-  if (!D->getDescribedFunctionTemplate() &&
-      !D->isFunctionTemplateSpecialization())
-    prettyPrintPragmas(D);
-
   CXXConstructorDecl *CDecl = dyn_cast<CXXConstructorDecl>(D);
   CXXConversionDecl *ConversionDecl = dyn_cast<CXXConversionDecl>(D);
   if (!Policy.SuppressSpecifiers) {
@@ -449,7 +452,7 @@ void DeclPrinter::VisitFunctionDecl(FunctionDecl *D) {
     case SC_Extern: Out << "extern "; break;
     case SC_Static: Out << "static "; break;
     case SC_PrivateExtern: Out << "__private_extern__ "; break;
-    case SC_Auto: case SC_Register:
+    case SC_Auto: case SC_Register: case SC_OpenCLWorkGroupLocal:
       llvm_unreachable("invalid for functions");
     }
 
@@ -676,7 +679,6 @@ void DeclPrinter::VisitFriendDecl(FriendDecl *D) {
 }
 
 void DeclPrinter::VisitFieldDecl(FieldDecl *D) {
-  // FIXME: add printing of pragma attributes if required.
   if (!Policy.SuppressSpecifiers && D->isMutable())
     Out << "mutable ";
   if (!Policy.SuppressSpecifiers && D->isModulePrivate())
@@ -706,7 +708,6 @@ void DeclPrinter::VisitLabelDecl(LabelDecl *D) {
 }
 
 void DeclPrinter::VisitVarDecl(VarDecl *D) {
-  prettyPrintPragmas(D);
   if (!Policy.SuppressSpecifiers) {
     StorageClass SC = D->getStorageClass();
     if (SC != SC_None)
@@ -809,12 +810,37 @@ void DeclPrinter::VisitNamespaceAliasDecl(NamespaceAliasDecl *D) {
   Out << *D->getAliasedNamespace();
 }
 
+//@@
+void DeclPrinter::VisitEscapeDecl(EscapeDecl *D) {
+  Out << ".~";
+  D->getExpr()->printPretty(Out, nullptr, Policy, Indentation);
+}
+
+void DeclPrinter::VisitInlineDecl(InlineDecl *D) {
+  Out << ".!";
+  D->getExpr()->printPretty(Out, nullptr, Policy, Indentation);
+}
+
+void DeclPrinter::VisitExecuteDecl(ExecuteDecl *D) {
+  Out << ".&";
+  D->getStmt()->printPretty(Out, nullptr, Policy, Indentation);
+}
+
+void DeclPrinter::VisitDefDecl(DefDecl *D) {
+  Out << ".@";
+  VisitDeclContext(D, false);
+}
+
+void DeclPrinter::VisitPreprocessorDirectiveDecl(PreprocessorDirectiveDecl *D) {
+  Out << D->getDirective();
+}
+//@@
+
 void DeclPrinter::VisitEmptyDecl(EmptyDecl *D) {
   prettyPrintAttributes(D);
 }
 
 void DeclPrinter::VisitCXXRecordDecl(CXXRecordDecl *D) {
-  // FIXME: add printing of pragma attributes if required.
   if (!Policy.SuppressSpecifiers && D->isModulePrivate())
     Out << "__module_private__ ";
   Out << D->getKindName();
@@ -950,13 +976,11 @@ void DeclPrinter::VisitFunctionTemplateDecl(FunctionTemplateDecl *D) {
   if (PrintInstantiation) {
     TemplateParameterList *Params = D->getTemplateParameters();
     for (auto *I : D->specializations()) {
-      prettyPrintPragmas(I);
       PrintTemplateParameters(Params, I->getTemplateSpecializationArgs());
       Visit(I);
     }
   }
 
-  prettyPrintPragmas(D->getTemplatedDecl());
   return VisitRedeclarableTemplateDecl(D);
 }
 
@@ -1126,7 +1150,7 @@ void DeclPrinter::VisitObjCInterfaceDecl(ObjCInterfaceDecl *OID) {
   }
   
   if (SID)
-    Out << " : " << QualType(OID->getSuperClassType(), 0).getAsString(Policy);
+    Out << " : " << OID->getSuperClass()->getName();
 
   // Protocols?
   const ObjCList<ObjCProtocolDecl> &Protocols = OID->getReferencedProtocols();
@@ -1337,7 +1361,7 @@ void DeclPrinter::VisitUnresolvedUsingValueDecl(UnresolvedUsingValueDecl *D) {
   if (!D->isAccessDeclaration())
     Out << "using ";
   D->getQualifier()->print(Out, Policy);
-  Out << D->getDeclName();
+  Out << D->getName();
 }
 
 void DeclPrinter::VisitUsingShadowDecl(UsingShadowDecl *D) {

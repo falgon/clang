@@ -1,6 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-unknown-unknown -target-feature +adx -emit-llvm -o - %s | FileCheck %s
-
-#define __MM_MALLOC_H
+// RUN: %clang_cc1 -triple x86_64-unknown-unknown -ffreestanding -emit-llvm -o - %s | FileCheck %s
 
 #include <x86intrin.h>
 

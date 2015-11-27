@@ -33,7 +33,6 @@ add_clang_library(clangStaticAnalyzerCheckers
   DirectIvarAssignment.cpp
   DivZeroChecker.cpp
   DynamicTypePropagation.cpp
-  DynamicTypeChecker.cpp
   ExprInspectionChecker.cpp
   FixedAddressChecker.cpp
   GenericTaintChecker.cpp
@@ -54,6 +53,7 @@ add_clang_library(clangStaticAnalyzerCheckers
   ObjCAtSyncChecker.cpp
   ObjCContainersASTChecker.cpp
   ObjCContainersChecker.cpp
+  ObjCGenericsChecker.cpp
   ObjCMissingSuperCallChecker.cpp
   ObjCSelfInitChecker.cpp
   ObjCUnusedIVarsChecker.cpp
@@ -76,7 +76,6 @@ add_clang_library(clangStaticAnalyzerCheckers
   UndefinedAssignmentChecker.cpp
   UnixAPIChecker.cpp
   UnreachableCodeChecker.cpp
-  VforkChecker.cpp
   VLASizeChecker.cpp
   VirtualCallChecker.cpp
 

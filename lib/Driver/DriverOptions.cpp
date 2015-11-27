@@ -34,7 +34,7 @@ namespace {
 class DriverOptTable : public OptTable {
 public:
   DriverOptTable()
-    : OptTable(InfoTable) {}
+    : OptTable(InfoTable, llvm::array_lengthof(InfoTable)) {}
 };
 
 }

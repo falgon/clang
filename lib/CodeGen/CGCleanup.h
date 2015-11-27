@@ -15,8 +15,6 @@
 #define LLVM_CLANG_LIB_CODEGEN_CGCLEANUP_H
 
 #include "EHScopeStack.h"
-
-#include "Address.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 
@@ -32,13 +30,6 @@ class FunctionDecl;
 namespace CodeGen {
 class CodeGenModule;
 class CodeGenFunction;
-
-/// The MS C++ ABI needs a pointer to RTTI data plus some flags to describe the
-/// type of a catch handler, so we use this wrapper.
-struct CatchTypeInfo {
-  llvm::Constant *RTTI;
-  unsigned Flags;
-};
 
 /// A protected scope for zero-cost EH handling.
 class EHScope {
@@ -108,7 +99,7 @@ protected:
   };
 
 public:
-  enum Kind { Cleanup, Catch, Terminate, Filter, PadEnd };
+  enum Kind { Cleanup, Catch, Terminate, Filter, CatchEnd };
 
   EHScope(Kind kind, EHScopeStack::stable_iterator enclosingEHScope)
     : CachedLandingPad(nullptr), CachedEHDispatchBlock(nullptr),
@@ -160,12 +151,12 @@ public:
   struct Handler {
     /// A type info value, or null (C++ null, not an LLVM null pointer)
     /// for a catch-all.
-    CatchTypeInfo Type;
+    llvm::Constant *Type;
 
     /// The catch handler for this type.
     llvm::BasicBlock *Block;
 
-    bool isCatchAll() const { return Type.RTTI == nullptr; }
+    bool isCatchAll() const { return Type == nullptr; }
   };
 
 private:
@@ -195,16 +186,10 @@ public:
   }
 
   void setCatchAllHandler(unsigned I, llvm::BasicBlock *Block) {
-    setHandler(I, CatchTypeInfo{nullptr, 0}, Block);
+    setHandler(I, /*catchall*/ nullptr, Block);
   }
 
   void setHandler(unsigned I, llvm::Constant *Type, llvm::BasicBlock *Block) {
-    assert(I < getNumHandlers());
-    getHandlers()[I].Type = CatchTypeInfo{Type, 0};
-    getHandlers()[I].Block = Block;
-  }
-
-  void setHandler(unsigned I, CatchTypeInfo Type, llvm::BasicBlock *Block) {
     assert(I < getNumHandlers());
     getHandlers()[I].Type = Type;
     getHandlers()[I].Block = Block;
@@ -320,14 +305,8 @@ public:
   bool isLifetimeMarker() const { return CleanupBits.IsLifetimeMarker; }
   void setLifetimeMarker() { CleanupBits.IsLifetimeMarker = true; }
 
-  bool hasActiveFlag() const { return ActiveFlag != nullptr; }
-  Address getActiveFlag() const {
-    return Address(ActiveFlag, CharUnits::One());
-  }
-  void setActiveFlag(Address Var) {
-    assert(Var.getAlignment().isOne());
-    ActiveFlag = cast<llvm::AllocaInst>(Var.getPointer());
-  }
+  llvm::AllocaInst *getActiveFlag() const { return ActiveFlag; }
+  void setActiveFlag(llvm::AllocaInst *Var) { ActiveFlag = Var; }
 
   void setTestFlagInNormalCleanup() {
     CleanupBits.TestFlagInNormalCleanup = true;
@@ -487,14 +466,14 @@ public:
   }
 };
 
-class EHPadEndScope : public EHScope {
+class EHCatchEndScope : public EHScope {
 public:
-  EHPadEndScope(EHScopeStack::stable_iterator enclosingEHScope)
-      : EHScope(PadEnd, enclosingEHScope) {}
-  static size_t getSize() { return sizeof(EHPadEndScope); }
+  EHCatchEndScope(EHScopeStack::stable_iterator enclosingEHScope)
+      : EHScope(CatchEnd, enclosingEHScope) {}
+  static size_t getSize() { return sizeof(EHCatchEndScope); }
 
   static bool classof(const EHScope *scope) {
-    return scope->getKind() == PadEnd;
+    return scope->getKind() == CatchEnd;
   }
 };
 
@@ -536,8 +515,8 @@ public:
       Size = EHTerminateScope::getSize();
       break;
 
-    case EHScope::PadEnd:
-      Size = EHPadEndScope::getSize();
+    case EHScope::CatchEnd:
+      Size = EHCatchEndScope::getSize();
       break;
     }
     Ptr += llvm::RoundUpToAlignment(Size, ScopeStackAlignment);
@@ -587,12 +566,12 @@ inline void EHScopeStack::popTerminate() {
   deallocate(EHTerminateScope::getSize());
 }
 
-inline void EHScopeStack::popPadEnd() {
+inline void EHScopeStack::popCatchEnd() {
   assert(!empty() && "popping exception stack when not empty");
 
-  EHPadEndScope &scope = cast<EHPadEndScope>(*begin());
+  EHCatchEndScope &scope = cast<EHCatchEndScope>(*begin());
   InnermostEHScope = scope.getEnclosingEHScope();
-  deallocate(EHPadEndScope::getSize());
+  deallocate(EHCatchEndScope::getSize());
 }
 
 inline EHScopeStack::iterator EHScopeStack::find(stable_iterator sp) const {
@@ -632,10 +611,6 @@ struct EHPersonality {
   static const EHPersonality MSVC_except_handler;
   static const EHPersonality MSVC_C_specific_handler;
   static const EHPersonality MSVC_CxxFrameHandler3;
-
-  /// Does this personality use landingpads or the family of pad instructions
-  /// designed to form funclets?
-  bool usesFuncletPads() const { return isMSVCPersonality(); }
 
   bool isMSVCPersonality() const {
     return this == &MSVC_except_handler || this == &MSVC_C_specific_handler ||

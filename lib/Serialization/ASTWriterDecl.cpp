@@ -108,6 +108,11 @@ namespace clang {
     void VisitStaticAssertDecl(StaticAssertDecl *D);
     void VisitBlockDecl(BlockDecl *D);
     void VisitCapturedDecl(CapturedDecl *D);
+//@@
+	void VisitInlineDecl(InlineDecl *D);
+	void VisitExecuteDecl(ExecuteDecl *D);
+	void VisitDefDecl(DefDecl *D);
+//@@
     void VisitEmptyDecl(EmptyDecl *D);
 
     void VisitDeclContext(DeclContext *DC, uint64_t LexicalOffset,
@@ -208,7 +213,7 @@ namespace clang {
       auto &&PartialSpecializations = getPartialSpecializations(Common);
       ArrayRef<DeclID> LazySpecializations;
       if (auto *LS = Common->LazySpecializations)
-        LazySpecializations = llvm::makeArrayRef(LS + 1, LS[0]);
+        LazySpecializations = ArrayRef<DeclID>(LS + 1, LS + 1 + LS[0]);
 
       // Add a slot to the record for the number of specializations.
       unsigned I = Record.size();
@@ -260,7 +265,7 @@ void ASTDeclWriter::Visit(Decl *D) {
   // Source locations require array (variable-length) abbreviations.  The
   // abbreviation infrastructure requires that arrays are encoded last, so
   // we handle it here in the case of those classes derived from DeclaratorDecl
-  if (DeclaratorDecl *DD = dyn_cast<DeclaratorDecl>(D)) {
+  if (DeclaratorDecl *DD = dyn_cast<DeclaratorDecl>(D)){
     Writer.AddTypeSourceInfo(DD->getTypeSourceInfo(), Record);
   }
 
@@ -977,6 +982,23 @@ void ASTDeclWriter::VisitFileScopeAsmDecl(FileScopeAsmDecl *D) {
   Code = serialization::DECL_FILE_SCOPE_ASM;
 }
 
+//@@
+void ASTDeclWriter::VisitInlineDecl(InlineDecl *D) {
+  VisitDecl(D);
+  Code = serialization::DECL_INLINE;
+}
+
+void ASTDeclWriter::VisitExecuteDecl(ExecuteDecl *D) {
+  VisitDecl(D);
+  Code = serialization::DECL_EXECUTE;
+}
+
+void ASTDeclWriter::VisitDefDecl(DefDecl *D) {
+  VisitDecl(D);
+  Code = serialization::DECL_DEF;
+}
+//@@
+
 void ASTDeclWriter::VisitEmptyDecl(EmptyDecl *D) {
   VisitDecl(D);
   Code = serialization::DECL_EMPTY;
@@ -1522,21 +1544,20 @@ void ASTDeclWriter::VisitDeclContext(DeclContext *DC, uint64_t LexicalOffset,
   Record.push_back(VisibleOffset);
 }
 
-const Decl *ASTWriter::getFirstLocalDecl(const Decl *D) {
-  /// \brief Is this a local declaration (that is, one that will be written to
-  /// our AST file)? This is the case for declarations that are neither imported
-  /// from another AST file nor predefined.
-  auto IsLocalDecl = [&](const Decl *D) -> bool {
-    if (D->isFromASTFile())
-      return false;
-    auto I = DeclIDs.find(D);
-    return (I == DeclIDs.end() || I->second >= NUM_PREDEF_DECL_IDS);
-  };
+/// \brief Is this a local declaration (that is, one that will be written to
+/// our AST file)? This is the case for declarations that are neither imported
+/// from another AST file nor predefined.
+static bool isLocalDecl(ASTWriter &W, const Decl *D) {
+  if (D->isFromASTFile())
+    return false;
+  return W.getDeclID(D) >= NUM_PREDEF_DECL_IDS;
+}
 
-  assert(IsLocalDecl(D) && "expected a local declaration");
+const Decl *ASTWriter::getFirstLocalDecl(const Decl *D) {
+  assert(isLocalDecl(*this, D) && "expected a local declaration");
 
   const Decl *Canon = D->getCanonicalDecl();
-  if (IsLocalDecl(Canon))
+  if (isLocalDecl(*this, Canon))
     return Canon;
 
   const Decl *&CacheEntry = FirstLocalDeclCache[Canon];
@@ -1544,7 +1565,7 @@ const Decl *ASTWriter::getFirstLocalDecl(const Decl *D) {
     return CacheEntry;
 
   for (const Decl *Redecl = D; Redecl; Redecl = Redecl->getPreviousDecl())
-    if (IsLocalDecl(Redecl))
+    if (isLocalDecl(*this, Redecl))
       D = Redecl;
   return CacheEntry = D;
 }
@@ -2050,6 +2071,7 @@ void ASTWriter::WriteDeclAbbrevs() {
 
   Abv = new BitCodeAbbrev();
   Abv->Add(BitCodeAbbrevOp(serialization::DECL_CONTEXT_VISIBLE));
+  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 32));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob));
   DeclContextVisibleLookupAbbrev = Stream.EmitAbbrev(Abv);
 }
@@ -2093,12 +2115,16 @@ void ASTWriter::WriteDecl(ASTContext &Context, Decl *D) {
 
   // Determine the ID for this declaration.
   serialization::DeclID ID;
-  assert(!D->isFromASTFile() && "should not be emitting imported decl");
-  serialization::DeclID &IDR = DeclIDs[D];
-  if (IDR == 0)
-    IDR = NextDeclID++;
+  if (D->isFromASTFile()) {
+    assert(isRewritten(D) && "should not be emitting imported decl");
+    ID = getDeclID(D);
+  } else {
+    serialization::DeclID &IDR = DeclIDs[D];
+    if (IDR == 0)
+      IDR = NextDeclID++;
     
-  ID = IDR;
+    ID= IDR;
+  }
 
   bool isReplacingADecl = ID < FirstDeclID;
 

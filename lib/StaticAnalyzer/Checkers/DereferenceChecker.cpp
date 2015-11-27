@@ -19,7 +19,6 @@
 #include "clang/StaticAnalyzer/Core/Checker.h"
 #include "clang/StaticAnalyzer/Core/CheckerManager.h"
 #include "clang/StaticAnalyzer/Core/PathSensitive/CheckerContext.h"
-#include "clang/StaticAnalyzer/Core/PathSensitive/CheckerHelpers.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -85,14 +84,14 @@ DereferenceChecker::AddDerefSource(raw_ostream &os,
       SourceLocation L = IV->getLocation();
       Ranges.push_back(SourceRange(L, L));
       break;
-    }
+    }    
   }
 }
 
 void DereferenceChecker::reportBug(ProgramStateRef State, const Stmt *S,
                                    CheckerContext &C, bool IsBind) const {
   // Generate an error node.
-  ExplodedNode *N = C.generateErrorNode(State);
+  ExplodedNode *N = C.generateSink(State);
   if (!N)
     return;
 
@@ -112,11 +111,15 @@ void DereferenceChecker::reportBug(ProgramStateRef State, const Stmt *S,
     S = expr->IgnoreParenLValueCasts();
 
   if (IsBind) {
-    const VarDecl *VD;
-    const Expr *Init;
-    std::tie(VD, Init) = parseAssignment(S);
-    if (VD && Init)
-      S = Init;
+    if (const BinaryOperator *BO = dyn_cast<BinaryOperator>(S)) {
+      if (BO->isAssignmentOp())
+        S = BO->getRHS();
+    } else if (const DeclStmt *DS = dyn_cast<DeclStmt>(S)) {
+      assert(DS->isSingleDecl() && "We process decls one by one");
+      if (const VarDecl *VD = dyn_cast<VarDecl>(DS->getSingleDecl()))
+        if (const Expr *Init = VD->getAnyInitializer())
+          S = Init;
+    }
   }
 
   switch (S->getStmtClass()) {
@@ -181,7 +184,7 @@ void DereferenceChecker::checkLocation(SVal l, bool isLoad, const Stmt* S,
                                        CheckerContext &C) const {
   // Check for dereference of an undefined value.
   if (l.isUndef()) {
-    if (ExplodedNode *N = C.generateErrorNode()) {
+    if (ExplodedNode *N = C.generateSink()) {
       if (!BT_undef)
         BT_undef.reset(
             new BuiltinBug(this, "Dereference of undefined pointer value"));
@@ -216,7 +219,7 @@ void DereferenceChecker::checkLocation(SVal l, bool isLoad, const Stmt* S,
     // Otherwise, we have the case where the location could either be
     // null or not-null.  Record the error node as an "implicit" null
     // dereference.
-    if (ExplodedNode *N = C.generateSink(nullState, C.getPredecessor())) {
+    if (ExplodedNode *N = C.generateSink(nullState)) {
       ImplicitNullDerefEvent event = {l, isLoad, N, &C.getBugReporter(),
                                       /*IsDirectDereference=*/false};
       dispatchEvent(event);
@@ -254,7 +257,7 @@ void DereferenceChecker::checkBind(SVal L, SVal V, const Stmt *S,
 
     // At this point the value could be either null or non-null.
     // Record this as an "implicit" null dereference.
-    if (ExplodedNode *N = C.generateSink(StNull, C.getPredecessor())) {
+    if (ExplodedNode *N = C.generateSink(StNull)) {
       ImplicitNullDerefEvent event = {V, /*isLoad=*/true, N,
                                       &C.getBugReporter(),
                                       /*IsDirectDereference=*/false};

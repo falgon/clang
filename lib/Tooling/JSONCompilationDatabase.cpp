@@ -206,33 +206,23 @@ JSONCompilationDatabase::getAllFiles() const {
 std::vector<CompileCommand>
 JSONCompilationDatabase::getAllCompileCommands() const {
   std::vector<CompileCommand> Commands;
-  getCommands(AllCommands, Commands);
+  for (llvm::StringMap< std::vector<CompileCommandRef> >::const_iterator
+        CommandsRefI = IndexByFile.begin(), CommandsRefEnd = IndexByFile.end();
+      CommandsRefI != CommandsRefEnd; ++CommandsRefI) {
+    getCommands(CommandsRefI->getValue(), Commands);
+  }
   return Commands;
 }
 
-static std::vector<std::string>
-nodeToCommandLine(const std::vector<llvm::yaml::ScalarNode *> &Nodes) {
-  SmallString<1024> Storage;
-  if (Nodes.size() == 1) {
-    return unescapeCommandLine(Nodes[0]->getValue(Storage));
-  }
-  std::vector<std::string> Arguments;
-  for (auto *Node : Nodes) {
-    Arguments.push_back(Node->getValue(Storage));
-  }
-  return Arguments;
-}
-
 void JSONCompilationDatabase::getCommands(
-    ArrayRef<CompileCommandRef> CommandsRef,
-    std::vector<CompileCommand> &Commands) const {
+                                  ArrayRef<CompileCommandRef> CommandsRef,
+                                  std::vector<CompileCommand> &Commands) const {
   for (int I = 0, E = CommandsRef.size(); I != E; ++I) {
     SmallString<8> DirectoryStorage;
-    SmallString<32> FilenameStorage;
+    SmallString<1024> CommandStorage;
     Commands.emplace_back(
-      std::get<0>(CommandsRef[I])->getValue(DirectoryStorage),
-      std::get<1>(CommandsRef[I])->getValue(FilenameStorage),
-      nodeToCommandLine(std::get<2>(CommandsRef[I])));
+      CommandsRef[I].first->getValue(DirectoryStorage),
+      CommandsRef[I].second);
   }
 }
 
@@ -259,8 +249,11 @@ bool JSONCompilationDatabase::parse(std::string &ErrorMessage) {
       return false;
     }
     llvm::yaml::ScalarNode *Directory = nullptr;
-    llvm::Optional<std::vector<llvm::yaml::ScalarNode *>> Command;
+    std::vector<std::string> Arguments;
+    std::vector<std::string> Command;
     llvm::yaml::ScalarNode *File = nullptr;
+    bool ArgumentsFound = false;
+    bool CommandFound = false;
     for (auto& NextKeyValue : *Object) {
       llvm::yaml::ScalarNode *KeyString =
           dyn_cast<llvm::yaml::ScalarNode>(NextKeyValue.getKey());
@@ -289,18 +282,18 @@ bool JSONCompilationDatabase::parse(std::string &ErrorMessage) {
       if (KeyValue == "directory") {
         Directory = ValueString;
       } else if (KeyValue == "arguments") {
-        Command = std::vector<llvm::yaml::ScalarNode *>();
-        for (auto &Argument : *SequenceString) {
-          auto Scalar = dyn_cast<llvm::yaml::ScalarNode>(&Argument);
-          if (!Scalar) {
-            ErrorMessage = "Only strings are allowed in 'arguments'.";
-            return false;
-          }
-          Command->push_back(Scalar);
+        for (auto& NextArgument : *SequenceString) {
+          SmallString<128> CommandStorage;
+          auto ValueString = dyn_cast<llvm::yaml::ScalarNode>(&NextArgument);
+
+          Arguments.push_back(ValueString->getValue(CommandStorage));
         }
+        ArgumentsFound = true;
       } else if (KeyValue == "command") {
-        if (!Command)
-          Command = std::vector<llvm::yaml::ScalarNode *>(1, ValueString);
+        SmallString<1024> CommandStorage;
+        // FIXME: Escape correctly:
+        Command = unescapeCommandLine(ValueString->getValue(CommandStorage));
+        CommandFound = true;
       } else if (KeyValue == "file") {
         File = ValueString;
       } else {
@@ -313,7 +306,7 @@ bool JSONCompilationDatabase::parse(std::string &ErrorMessage) {
       ErrorMessage = "Missing key: \"file\".";
       return false;
     }
-    if (!Command) {
+    if (!ArgumentsFound && !CommandFound) {
       ErrorMessage = "Missing key: \"command\" or \"arguments\".";
       return false;
     }
@@ -333,9 +326,8 @@ bool JSONCompilationDatabase::parse(std::string &ErrorMessage) {
     } else {
       llvm::sys::path::native(FileName, NativeFilePath);
     }
-    auto Cmd = CompileCommandRef(Directory, File, *Command);
-    IndexByFile[NativeFilePath].push_back(Cmd);
-    AllCommands.push_back(Cmd);
+    IndexByFile[NativeFilePath].push_back(
+        CompileCommandRef(Directory, ArgumentsFound ? Arguments : Command));
     MatchTrie.insert(NativeFilePath);
   }
   return true;

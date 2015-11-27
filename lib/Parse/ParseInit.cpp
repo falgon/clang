@@ -167,14 +167,19 @@ ExprResult Parser::ParseInitializerWithPotentialDesignator() {
       // designator: '.' identifier
       SourceLocation DotLoc = ConsumeToken();
 
-      if (Tok.isNot(tok::identifier)) {
+//@@
+//@@was:      if (Tok.isNot(tok::identifier)) {
+      IdentifierInfo *II;
+      SourceLocation Loc;
+      if (!Tok.isIdentifier() || !(II = ParseIdentifier(&Loc))) {
+//@@
         Diag(Tok.getLocation(), diag::err_expected_field_designator);
         return ExprError();
       }
 
-      Desig.AddDesignator(Designator::getField(Tok.getIdentifierInfo(), DotLoc,
-                                               Tok.getLocation()));
-      ConsumeToken(); // Eat the identifier.
+      Desig.AddDesignator(Designator::getField(II, DotLoc, Loc));
+		  //@@was: Tok.getIdentifierInfo(), DotLoc, Tok.getLocation()));
+      //@@was: ConsumeToken(); // Eat the identifier.
       continue;
     }
 

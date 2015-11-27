@@ -252,8 +252,8 @@ StmtResult Sema::ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
       InputName = Names[i]->getName();
 
     TargetInfo::ConstraintInfo Info(Literal->getString(), InputName);
-    if (!Context.getTargetInfo().validateInputConstraint(OutputConstraintInfos,
-                                                         Info)) {
+    if (!Context.getTargetInfo().validateInputConstraint(
+            OutputConstraintInfos.data(), NumOutputs, Info)) {
       return StmtError(Diag(Literal->getLocStart(),
                             diag::err_asm_invalid_input_constraint)
                        << Info.getConstraintStr());
@@ -420,8 +420,6 @@ StmtResult Sema::ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
                             diag::err_asm_unexpected_constraint_alternatives)
                        << NumAlternatives << AltCount);
   }
-  SmallVector<size_t, 4> InputMatchedToOutput(OutputConstraintInfos.size(),
-                                              ~0U);
   for (unsigned i = 0, e = InputConstraintInfos.size(); i != e; ++i) {
     TargetInfo::ConstraintInfo &Info = InputConstraintInfos[i];
     StringRef ConstraintStr = Info.getConstraintStr();
@@ -442,19 +440,6 @@ StmtResult Sema::ActOnGCCAsmStmt(SourceLocation AsmLoc, bool IsSimple,
     unsigned InputOpNo = i+NumOutputs;
     Expr *OutputExpr = Exprs[TiedTo];
     Expr *InputExpr = Exprs[InputOpNo];
-
-    // Make sure no more than one input constraint matches each output.
-    assert(TiedTo < InputMatchedToOutput.size() && "TiedTo value out of range");
-    if (InputMatchedToOutput[TiedTo] != ~0U) {
-      Diag(NS->getInputExpr(i)->getLocStart(),
-           diag::err_asm_input_duplicate_match)
-          << TiedTo;
-      Diag(NS->getInputExpr(InputMatchedToOutput[TiedTo])->getLocStart(),
-           diag::note_asm_input_duplicate_first)
-          << TiedTo;
-      return StmtError();
-    }
-    InputMatchedToOutput[TiedTo] = i;
 
     if (OutputExpr->isTypeDependent() || InputExpr->isTypeDependent())
       continue;
@@ -690,7 +675,7 @@ Sema::LookupInlineAsmVarDeclField(Expr *E, StringRef Member, unsigned &Offset,
   // Make an Expr to thread through OpDecl.
   ExprResult Result = BuildMemberReferenceExpr(
       E, E->getType(), AsmLoc, /*IsArrow=*/false, CXXScopeSpec(),
-      SourceLocation(), nullptr, FieldResult, nullptr, nullptr);
+      SourceLocation(), nullptr, FieldResult, nullptr);
   if (Result.isInvalid())
     return Result;
   Info.OpDecl = Result.get();

@@ -685,8 +685,7 @@ void Sema::deduceClosureReturnType(CapturingScopeInfo &CSI) {
 
     QualType ReturnType =
         (RetE ? RetE->getType() : Context.VoidTy).getUnqualifiedType();
-    if (Context.getCanonicalFunctionResultType(ReturnType) ==
-          Context.getCanonicalFunctionResultType(CSI.ReturnType))
+    if (Context.hasSameType(ReturnType, CSI.ReturnType))
       continue;
 
     // FIXME: This is a poor diagnostic for ReturnStmts without expressions.
@@ -699,11 +698,18 @@ void Sema::deduceClosureReturnType(CapturingScopeInfo &CSI) {
   }
 }
 
-QualType Sema::buildLambdaInitCaptureInitialization(SourceLocation Loc,
-                                                    bool ByRef,
-                                                    IdentifierInfo *Id,
-                                                    bool IsDirectInit,
-                                                    Expr *&Init) {
+QualType Sema::performLambdaInitCaptureInitialization(SourceLocation Loc,
+                                                      bool ByRef,
+                                                      IdentifierInfo *Id,
+                                                      Expr *&Init) {
+
+  // We do not need to distinguish between direct-list-initialization
+  // and copy-list-initialization here, because we will always deduce
+  // std::initializer_list<T>, and direct- and copy-list-initialization
+  // always behave the same for such a type.
+  // FIXME: We should model whether an '=' was present.
+  const bool IsDirectInit = isa<ParenListExpr>(Init) || isa<InitListExpr>(Init);
+
   // Create an 'auto' or 'auto&' TypeSourceInfo that we can use to
   // deduce against.
   QualType DeductType = Context.getAutoDeductType();
@@ -716,15 +722,49 @@ QualType Sema::buildLambdaInitCaptureInitialization(SourceLocation Loc,
   }
   TypeSourceInfo *TSI = TLB.getTypeSourceInfo(Context, DeductType);
 
-  // Deduce the type of the init capture.
-  QualType DeducedType = deduceVarTypeFromInitializer(
-      /*VarDecl*/nullptr, DeclarationName(Id), DeductType, TSI,
-      SourceRange(Loc, Loc), IsDirectInit, Init);
-  if (DeducedType.isNull())
-    return QualType();
-
   // Are we a non-list direct initialization?
   ParenListExpr *CXXDirectInit = dyn_cast<ParenListExpr>(Init);
+
+  Expr *DeduceInit = Init;
+  // Initializer could be a C++ direct-initializer. Deduction only works if it
+  // contains exactly one expression.
+  if (CXXDirectInit) {
+    if (CXXDirectInit->getNumExprs() == 0) {
+      Diag(CXXDirectInit->getLocStart(), diag::err_init_capture_no_expression)
+          << DeclarationName(Id) << TSI->getType() << Loc;
+      return QualType();
+    } else if (CXXDirectInit->getNumExprs() > 1) {
+      Diag(CXXDirectInit->getExpr(1)->getLocStart(),
+           diag::err_init_capture_multiple_expressions)
+          << DeclarationName(Id) << TSI->getType() << Loc;
+      return QualType();
+    } else {
+      DeduceInit = CXXDirectInit->getExpr(0);
+      if (isa<InitListExpr>(DeduceInit))
+        Diag(CXXDirectInit->getLocStart(), diag::err_init_capture_paren_braces)
+          << DeclarationName(Id) << Loc;
+    }
+  }
+
+  // Now deduce against the initialization expression and store the deduced
+  // type below.
+  QualType DeducedType;
+  if (DeduceAutoType(TSI, DeduceInit, DeducedType) == DAR_Failed) {
+    if (isa<InitListExpr>(Init))
+      Diag(Loc, diag::err_init_capture_deduction_failure_from_init_list)
+          << DeclarationName(Id)
+          << (DeduceInit->getType().isNull() ? TSI->getType()
+                                             : DeduceInit->getType())
+          << DeduceInit->getSourceRange();
+    else
+      Diag(Loc, diag::err_init_capture_deduction_failure)
+          << DeclarationName(Id) << TSI->getType()
+          << (DeduceInit->getType().isNull() ? TSI->getType()
+                                             : DeduceInit->getType())
+          << DeduceInit->getSourceRange();
+  }
+  if (DeducedType.isNull())
+    return QualType();
 
   // Perform initialization analysis and ensure any implicit conversions
   // (such as lvalue-to-rvalue) are enforced.
@@ -762,10 +802,9 @@ QualType Sema::buildLambdaInitCaptureInitialization(SourceLocation Loc,
   return DeducedType;
 }
 
-VarDecl *Sema::createLambdaInitCaptureVarDecl(SourceLocation Loc,
-                                              QualType InitCaptureType,
-                                              IdentifierInfo *Id,
-                                              unsigned InitStyle, Expr *Init) {
+VarDecl *Sema::createLambdaInitCaptureVarDecl(SourceLocation Loc, 
+    QualType InitCaptureType, IdentifierInfo *Id, Expr *Init) {
+
   TypeSourceInfo *TSI = Context.getTrivialTypeSourceInfo(InitCaptureType,
       Loc);
   // Create a dummy variable representing the init-capture. This is not actually
@@ -776,8 +815,6 @@ VarDecl *Sema::createLambdaInitCaptureVarDecl(SourceLocation Loc,
                                    Loc, Id, InitCaptureType, TSI, SC_Auto);
   NewVD->setInitCapture(true);
   NewVD->setReferenced(true);
-  // FIXME: Pass in a VarDecl::InitializationStyle.
-  NewVD->setInitStyle(static_cast<VarDecl::InitializationStyle>(InitStyle));
   NewVD->markUsed(Context);
   NewVD->setInit(Init);
   return NewVD;
@@ -976,23 +1013,8 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
       // in this case.
       if (C->InitCaptureType.get().isNull()) 
         continue;
-
-      unsigned InitStyle;
-      switch (C->InitKind) {
-      case LambdaCaptureInitKind::NoInit:
-        llvm_unreachable("not an init-capture?");
-      case LambdaCaptureInitKind::CopyInit:
-        InitStyle = VarDecl::CInit;
-        break;
-      case LambdaCaptureInitKind::DirectInit:
-        InitStyle = VarDecl::CallInit;
-        break;
-      case LambdaCaptureInitKind::ListInit:
-        InitStyle = VarDecl::ListInit;
-        break;
-      }
-      Var = createLambdaInitCaptureVarDecl(C->Loc, C->InitCaptureType.get(),
-                                           C->Id, InitStyle, C->Init.get());
+      Var = createLambdaInitCaptureVarDecl(C->Loc, C->InitCaptureType.get(), 
+            C->Id, C->Init.get());
       // C++1y [expr.prim.lambda]p11:
       //   An init-capture behaves as if it declares and explicitly
       //   captures a variable [...] whose declarative region is the
@@ -1000,9 +1022,6 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
       if (Var)
         PushOnScopeChains(Var, CurScope, false);
     } else {
-      assert(C->InitKind == LambdaCaptureInitKind::NoInit &&
-             "init capture has valid but null init?");
-
       // C++11 [expr.prim.lambda]p8:
       //   If a lambda-capture includes a capture-default that is &, the 
       //   identifiers in the lambda-capture shall not be preceded by &.
@@ -1031,7 +1050,8 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
       if (R.empty()) {
         // FIXME: Disable corrections that would add qualification?
         CXXScopeSpec ScopeSpec;
-        if (DiagnoseEmptyLookup(CurScope, ScopeSpec, R,
+        if (/*@@*/!getCurScope()->getQuasiQuotesParent() && /*@@*/
+			DiagnoseEmptyLookup(CurScope, ScopeSpec, R,
                                 llvm::make_unique<DeclFilterCCC<VarDecl>>()))
           continue;
       }
@@ -1039,6 +1059,19 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
       Var = R.getAsSingle<VarDecl>();
       if (Var && DiagnoseUseOfDecl(Var, C->Loc))
         continue;
+//@@
+      if (!Var && (CurContext->allowUnresolvedIds() || C->Id->isMetaGenerated())) {
+        // Create a fake var entry for the capture
+		SourceLocation Loc = C->Loc;
+		QualType Type = Context.DependentTy;
+		DeclContext *QQDC = getCurQuasiQuotesDecl();
+		DeclContext *DC = QQDC ? QQDC : CurContext;
+
+        Var = VarDecl::Create(Context, DC, Loc, Loc, C->Id, Type,
+          Context.getTrivialTypeSourceInfo(Type, Loc), SC_Auto);
+		Var->setImplicit(true);        
+      }
+//@@
     }
 
     // C++11 [expr.prim.lambda]p8:
@@ -1062,6 +1095,44 @@ void Sema::ActOnStartOfLambdaDefinition(LambdaIntroducer &Intro,
     //   duration declared in the reaching scope of the local lambda expression.
     // Note that the 'reaching scope' check happens in tryCaptureVariable().
     if (!Var) {
+//@@
+      bool isMetageneratedId = C->Id->isMetaGenerated();
+      if (CurContext->allowUnresolvedIds() || isMetageneratedId) { //enter a fake capture entry
+		SourceLocation Loc = C->Loc;
+		QualType Type = Context.DependentTy;
+		DeclContext *QQDC = getCurQuasiQuotesDecl();
+		DeclContext *DC = QQDC ? QQDC : CurContext;
+
+        Var = VarDecl::Create(Context, DC, Loc, Loc, C->Id, Type,
+          Context.getTrivialTypeSourceInfo(Type, Loc), SC_None);
+		Var->setImplicit(true);
+
+        bool isParameterPack = isMetageneratedId &&
+          isa<PackExpansionExpr>(C->Id->getFETokenInfo<Expr>());
+        SourceLocation EllipsisLoc;
+        if (C->EllipsisLoc.isValid()) {
+          if (isParameterPack)
+            EllipsisLoc = C->EllipsisLoc;
+          else
+            Diag(C->EllipsisLoc, diag::err_pack_expansion_without_parameter_packs)
+              << SourceRange(C->Loc);        
+          // Just ignore the ellipsis.
+        }
+        else if (isParameterPack)
+          ContainsUnexpandedParameterPack = true;
+
+		//@@FIXME: this is copied from the implementation of addAsFieldToClosureType
+        CXXRecordDecl *Lambda = LSI->Lambda;
+        FieldDecl *Field = FieldDecl::Create(Context, Lambda, Loc, Loc, nullptr, Type,
+          Context.getTrivialTypeSourceInfo(Type, Loc), nullptr, false, ICIS_NoInit);
+        Field->setImplicit(true);
+        Field->setAccess(AS_private);
+        Lambda->addDecl(Field);
+		//@@
+        LSI->addCapture(Var, false, true, false, Loc, EllipsisLoc, Type, nullptr);        
+      }
+	  else
+//@@
       Diag(C->Loc, diag::err_capture_does_not_name_variable) << C->Id;
       continue;
     }

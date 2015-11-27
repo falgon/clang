@@ -38,7 +38,7 @@ PragmaHandler::~PragmaHandler() {
 // EmptyPragmaHandler Implementation.
 //===----------------------------------------------------------------------===//
 
-EmptyPragmaHandler::EmptyPragmaHandler(StringRef Name) : PragmaHandler(Name) {}
+EmptyPragmaHandler::EmptyPragmaHandler() {}
 
 void EmptyPragmaHandler::HandlePragma(Preprocessor &PP, 
                                       PragmaIntroducerKind Introducer,

@@ -348,13 +348,9 @@ macro(set_clang_windows_version_resource_properties name)
   endif()
 endmacro()
 
-macro(add_clang_subdirectory name)
-  add_llvm_subdirectory(CLANG TOOL ${name})
-endmacro()
-
 macro(add_clang_library name)
   cmake_parse_arguments(ARG
-    "SHARED"
+    ""
     ""
     "ADDITIONAL_HEADERS"
     ${ARGN})
@@ -390,29 +386,17 @@ macro(add_clang_library name)
       ${ARG_ADDITIONAL_HEADERS} # It may contain unparsed unknown args.
       )
   endif()
-  if(ARG_SHARED)
-    set(ARG_ENABLE_SHARED SHARED)
-  endif()
-  llvm_add_library(${name} ${ARG_ENABLE_SHARED} ${ARG_UNPARSED_ARGUMENTS} ${srcs})
+  llvm_add_library(${name} ${ARG_UNPARSED_ARGUMENTS} ${srcs})
 
   if(TARGET ${name})
     target_link_libraries(${name} ${cmake_2_8_12_INTERFACE} ${LLVM_COMMON_LIBS})
 
     if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY OR ${name} STREQUAL "libclang")
       install(TARGETS ${name}
-        COMPONENT ${name}
         EXPORT ClangTargets
         LIBRARY DESTINATION lib${LLVM_LIBDIR_SUFFIX}
         ARCHIVE DESTINATION lib${LLVM_LIBDIR_SUFFIX}
         RUNTIME DESTINATION bin)
-
-      if (${ARG_SHARED} AND NOT CMAKE_CONFIGURATION_TYPES)
-        add_custom_target(install-${name}
-                          DEPENDS ${name}
-                          COMMAND "${CMAKE_COMMAND}"
-                                  -DCMAKE_INSTALL_COMPONENT=${name}
-                                  -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
-      endif()
     endif()
     set_property(GLOBAL APPEND PROPERTY CLANG_EXPORTS ${name})
   else()
@@ -429,12 +413,6 @@ macro(add_clang_executable name)
   set_target_properties(${name} PROPERTIES FOLDER "Clang executables")
   set_clang_windows_version_resource_properties(${name})
 endmacro(add_clang_executable)
-
-macro(add_clang_symlink name dest)
-  add_llvm_tool_symlink(${name} ${dest} ALWAYS_GENERATE)
-  # Always generate install targets
-  llvm_install_symlink(${name} ${dest} ALWAYS_GENERATE)
-endmacro()
 
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
 
@@ -462,27 +440,12 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
     )
 endif()
 
-if(INTERNAL_INSTALL_PREFIX)
-  set(LIBCLANG_HEADERS_INSTALL_DESTINATION "${INTERNAL_INSTALL_PREFIX}/include")
-else()
-  set(LIBCLANG_HEADERS_INSTALL_DESTINATION include)
-endif()
-
 install(DIRECTORY include/clang-c
-  COMPONENT libclang-headers
-  DESTINATION "${LIBCLANG_HEADERS_INSTALL_DESTINATION}"
+  DESTINATION include
   FILES_MATCHING
   PATTERN "*.h"
   PATTERN ".svn" EXCLUDE
   )
-
-if (NOT CMAKE_CONFIGURATION_TYPES) # don't add this for IDE's.
-  add_custom_target(install-libclang-headers
-    DEPENDS
-    COMMAND "${CMAKE_COMMAND}"
-            -DCMAKE_INSTALL_COMPONENT=libclang-headers
-            -P "${CMAKE_BINARY_DIR}/cmake_install.cmake")
-endif()
 
 add_definitions( -D_GNU_SOURCE )
 
@@ -521,10 +484,6 @@ set(LIBCLANG_LIBRARY_VERSION
     "Version number that will be placed into the libclang library , in the form XX.YY")
 mark_as_advanced(CLANG_EXECUTABLE_VERSION LIBCLANG_LIBRARY_VERSION)
 
-option(CLANG_INCLUDE_TESTS
-       "Generate build targets for the Clang unit tests."
-       ${LLVM_INCLUDE_TESTS})
-
 add_subdirectory(utils/TableGen)
 
 add_subdirectory(include)
@@ -544,6 +503,10 @@ else()
   set(ENABLE_CLANG_EXAMPLES "0")
 endif()
 add_subdirectory(examples)
+
+option(CLANG_INCLUDE_TESTS
+       "Generate build targets for the Clang unit tests."
+       ${LLVM_INCLUDE_TESTS})
 
 if( CLANG_INCLUDE_TESTS )
   if(EXISTS ${LLVM_MAIN_SRC_DIR}/utils/unittest/googletest/include/gtest/gtest.h)
@@ -581,8 +544,7 @@ endif()
 set(CLANG_ORDER_FILE "" CACHE FILEPATH
   "Order file to use when compiling clang in order to improve startup time.")
 
-if (CLANG_BUILT_STANDALONE OR CMAKE_VERSION VERSION_EQUAL 3 OR
-    CMAKE_VERSION VERSION_GREATER 3)
+if (CLANG_BUILT_STANDALONE)
   # Generate a list of CMake library targets so that other CMake projects can
   # link against them. LLVM calls its version of this file LLVMExports.cmake, but
   # the usual CMake convention seems to be ${Project}Targets.cmake.
@@ -626,64 +588,22 @@ if (CLANG_ENABLE_BOOTSTRAP)
   set(STAMP_DIR ${CMAKE_CURRENT_BINARY_DIR}/bootstrap-stamps/)
   set(BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/bootstrap-bins/)
 
-  # If on Darwin we need to make bootstrap depend on LTO and pass
-  # DARWIN_LTO_LIBRARY so that -flto will work using the just-built compiler
-  if(APPLE)
-    set(LTO_DEP LTO llvm-ar llvm-ranlib)
-    set(LTO_LIBRARY -DDARWIN_LTO_LIBRARY=${LLVM_SHLIB_OUTPUT_INTDIR}/libLTO.dylib)
-    set(LTO_AR -DCMAKE_AR=${LLVM_RUNTIME_OUTPUT_INTDIR}/llvm-ar)
-    set(LTO_RANLIB -DCMAKE_RANLIB=${LLVM_RUNTIME_OUTPUT_INTDIR}/llvm-ranlib)
-  endif()
-
   add_custom_target(bootstrap-clear
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bootstrap-cleared
     )
   add_custom_command(
     OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/bootstrap-cleared
-    DEPENDS clang ${LTO_DEP}
+    DEPENDS clang
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${BINARY_DIR}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${BINARY_DIR}
     COMMAND ${CMAKE_COMMAND} -E remove_directory ${STAMP_DIR}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${STAMP_DIR}
+    COMMAND ${CMAKE_COMMAND} -E touch ${CMAKE_CURRENT_BINARY_DIR}/bootstrap-cleared
     COMMENT "Clobberring bootstrap build and stamp directories"
     )
 
-  if(CMAKE_VERBOSE_MAKEFILE)
-    set(verbose -DCMAKE_VERBOSE_MAKEFILE=On)
-  endif()
-
-  set(BOOTSTRAP_DEFAULT_PASSTHROUGH
-    PACKAGE_VERSION
-    LLVM_VERSION_MAJOR
-    LLVM_VERSION_MINOR
-    LLVM_VERSION_PATCH
-    LLVM_VERSION_SUFFIX
-    CLANG_REPOSITORY_STRING
-    CMAKE_MAKE_PROGRAM)
-
-  # Find all variables that start with BOOTSTRAP_ and populate a variable with
-  # them.
-  get_cmake_property(variableNames VARIABLES)
-  foreach(variableName ${variableNames})
-    if(variableName MATCHES "^BOOTSTRAP_")
-      string(SUBSTRING ${variableName} 10 -1 varName)
-      string(REPLACE ";" "\;" value "${${variableName}}")
-      list(APPEND PASSTHROUGH_VARIABLES
-        -D${varName}=${value})
-    endif()
-  endforeach()
-
-  # Populate the passthrough variables
-  foreach(variableName ${CLANG_BOOTSTRAP_PASSTHROUGH} ${BOOTSTRAP_DEFAULT_PASSTHROUGH})
-    if(${variableName})
-      string(REPLACE ";" "\;" value ${${variableName}})
-      list(APPEND PASSTHROUGH_VARIABLES
-        -D${variableName}=${value})
-    endif()
-  endforeach()
-
   ExternalProject_Add(bootstrap
-    DEPENDS clang ${LTO_DEP}
+    DEPENDS clang
     PREFIX bootstrap
     SOURCE_DIR ${CMAKE_SOURCE_DIR}
     STAMP_DIR ${STAMP_DIR}
@@ -694,11 +614,8 @@ if (CLANG_ENABLE_BOOTSTRAP)
                 # seem to work, so instead I'm passing this through
                 -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
                 ${CLANG_BOOTSTRAP_CMAKE_ARGS}
-                ${PASSTHROUGH_VARIABLES}
-                -DCMAKE_CXX_COMPILER=${LLVM_RUNTIME_OUTPUT_INTDIR}/clang++
-                -DCMAKE_C_COMPILER=${LLVM_RUNTIME_OUTPUT_INTDIR}/clang
-                -DCMAKE_ASM_COMPILER=${LLVM_RUNTIME_OUTPUT_INTDIR}/clang
-                ${LTO_LIBRARY} ${LTO_AR} ${LTO_RANLIB} ${verbose}
+                -DCMAKE_CXX_COMPILER=${CMAKE_BINARY_DIR}/bin/clang++
+                -DCMAKE_C_COMPILER=${CMAKE_BINARY_DIR}/bin/clang
     INSTALL_COMMAND ""
     STEP_TARGETS configure build
     ${cmake_3_4_USES_TERMINAL_OPTIONS}

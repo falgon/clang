@@ -8,8 +8,8 @@ void constraints() {
   unsigned short us;
   int            i;
   unsigned int   ui;
-  long long      ll;
-  unsigned long long ull;
+  long           l;
+  unsigned long  ul;
   float          f;
   double         d;
 
@@ -29,9 +29,9 @@ void constraints() {
   asm volatile ("mov.b32 %0, %1;" : "=r"(ui) : "r"(ui));
 
   // CHECK: i64 asm sideeffect "mov.b64 $0, $1;", "=l,l"
-  asm volatile ("mov.b64 %0, %1;" : "=l"(ll) : "l"(ll));
+  asm volatile ("mov.b64 %0, %1;" : "=l"(l) : "l"(l));
   // CHECK: i64 asm sideeffect "mov.b64 $0, $1;", "=l,l"
-  asm volatile ("mov.b64 %0, %1;" : "=l"(ull) : "l"(ull));
+  asm volatile ("mov.b64 %0, %1;" : "=l"(ul) : "l"(ul));
 
   // CHECK: float asm sideeffect "mov.b32 $0, $1;", "=f,f"
   asm volatile ("mov.b32 %0, %1;" : "=f"(f) : "f"(f));

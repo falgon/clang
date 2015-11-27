@@ -334,9 +334,9 @@ public:
   /// Pops a terminate handler off the stack.
   void popTerminate();
 
-  void pushPadEnd(llvm::BasicBlock *PadEndBB);
+  void pushCatchEnd(llvm::BasicBlock *CatchEndBlockBB);
 
-  void popPadEnd();
+  void popCatchEnd();
 
   // Returns true iff the current scope is either empty or contains only
   // lifetime markers, i.e. no real cleanup code
@@ -365,6 +365,7 @@ public:
     return InnermostEHScope;
   }
 
+  stable_iterator getInnermostActiveEHScope() const;
 
   /// An unstable reference to a scope-stack depth.  Invalidated by
   /// pushes but not pops.
@@ -394,6 +395,9 @@ public:
   /// Turn a stable reference to a scope depth into a unstable pointer
   /// to the EH stack.
   iterator find(stable_iterator save) const;
+
+  /// Removes the cleanup pointed to by the given stable_iterator.
+  void removeCleanup(stable_iterator save);
 
   /// Add a branch fixup to the current cleanup scope.
   BranchFixup &addBranchFixup() {

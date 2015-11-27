@@ -123,6 +123,13 @@ public:
 
     /// We are currently in the filter expression of an SEH except block.
     SEHFilterScope = 0x200000,
+
+//@@
+    /// \brief This is a QuasiQuotes scope.
+    QuasiQuotesScope = 0x400000,
+    /// \brief This is an Escape scope.
+    EscapeScope = 0x800000,
+//@@
   };
 private:
   /// The parent scope for this scope.  This is null for the translation-unit
@@ -171,6 +178,16 @@ private:
   /// case of nested templates, template parameter scopes can have
   /// other template parameter scopes as parents.
   Scope *TemplateParamParent;
+
+//@@
+  /// QuasiQuotesParent - If this scope has a parent QuasiQuotes scope,
+  /// this pointer is non-null and points to it.
+  Scope *QuasiQuotesParent;
+
+  /// EscapeParent - If this scope has a parent Escape scope,
+  /// this pointer is non-null and points to it.
+  Scope *EscapeParent;
+//@@
 
   /// DeclsInScope - This keeps track of all declarations in this scope.  When
   /// the declaration is added to the scope, it is set as the current
@@ -249,6 +266,18 @@ public:
 
   Scope *getTemplateParamParent() { return TemplateParamParent; }
   const Scope *getTemplateParamParent() const { return TemplateParamParent; }
+
+//@@
+  /// getQuasiQuotesParent - Return the closest QuasiQuotes scope.
+  ///
+  const Scope *getQuasiQuotesParent() const { return QuasiQuotesParent; }
+  Scope *getQuasiQuotesParent() { return QuasiQuotesParent; }
+
+  /// getEscapeParent - Return the closest Escape scope.
+  ///
+  const Scope *getEscapeParent() const { return EscapeParent; }
+  Scope *getEscapeParent() { return EscapeParent; }
+//@@
 
   /// Returns the number of function prototype scopes in this scope
   /// chain.

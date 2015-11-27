@@ -279,7 +279,9 @@ void LineTableInfo::AddEntry(FileID FID,
 /// getLineTableFilenameID - Return the uniqued ID for the specified filename.
 ///
 unsigned SourceManager::getLineTableFilenameID(StringRef Name) {
-  return getLineTable().getLineTableFilenameID(Name);
+  if (!LineTable)
+    LineTable = new LineTableInfo();
+  return LineTable->getLineTableFilenameID(Name);
 }
 
 
@@ -300,7 +302,9 @@ void SourceManager::AddLineNote(SourceLocation Loc, unsigned LineNo,
   // Remember that this file has #line directives now if it doesn't already.
   const_cast<SrcMgr::FileInfo&>(FileInfo).setHasLineDirectives();
 
-  getLineTable().AddLineNote(LocInfo.first, LocInfo.second, LineNo, FilenameID);
+  if (!LineTable)
+    LineTable = new LineTableInfo();
+  LineTable->AddLineNote(LocInfo.first, LocInfo.second, LineNo, FilenameID);
 }
 
 /// AddLineNote - Add a GNU line marker to the line table.
@@ -328,7 +332,8 @@ void SourceManager::AddLineNote(SourceLocation Loc, unsigned LineNo,
   // Remember that this file has #line directives now if it doesn't already.
   const_cast<SrcMgr::FileInfo&>(FileInfo).setHasLineDirectives();
 
-  (void) getLineTable();
+  if (!LineTable)
+    LineTable = new LineTableInfo();
 
   SrcMgr::CharacteristicKind FileKind;
   if (IsExternCHeader)
@@ -361,7 +366,7 @@ LineTableInfo &SourceManager::getLineTable() {
 SourceManager::SourceManager(DiagnosticsEngine &Diag, FileManager &FileMgr,
                              bool UserFilesAreVolatile)
   : Diag(Diag), FileMgr(FileMgr), OverridenFilesKeepOriginalName(true),
-    UserFilesAreVolatile(UserFilesAreVolatile), FilesAreTransient(false),
+    UserFilesAreVolatile(UserFilesAreVolatile),
     ExternalSLocEntries(nullptr), LineTable(nullptr), NumLinearScans(0),
     NumBinaryProbes(0) {
   clearIDTables();
@@ -439,7 +444,6 @@ SourceManager::getOrCreateContentCache(const FileEntry *FileEnt,
   }
 
   Entry->IsSystemFile = isSystemFile;
-  Entry->IsTransient = FilesAreTransient;
 
   return Entry;
 }
@@ -674,9 +678,11 @@ void SourceManager::disableFileContentsOverride(const FileEntry *File) {
   OverriddenFilesInfo->OverriddenFilesWithBuffer.erase(File);
 }
 
-void SourceManager::setFileIsTransient(const FileEntry *File) {
+void SourceManager::embedFileContentsInModule(const FileEntry *File) {
+  // We model an embedded file as a file whose buffer has been overridden
+  // by its contents as they are now.
   const SrcMgr::ContentCache *CC = getOrCreateContentCache(File);
-  const_cast<SrcMgr::ContentCache *>(CC)->IsTransient = true;
+  const_cast<SrcMgr::ContentCache *>(CC)->BufferOverridden = true;
 }
 
 StringRef SourceManager::getBufferData(FileID FID, bool *Invalid) const {
@@ -998,17 +1004,12 @@ SourceManager::getExpansionRange(SourceLocation Loc) const {
   return Res;
 }
 
-bool SourceManager::isMacroArgExpansion(SourceLocation Loc,
-                                        SourceLocation *StartLoc) const {
+bool SourceManager::isMacroArgExpansion(SourceLocation Loc) const {
   if (!Loc.isMacroID()) return false;
 
   FileID FID = getFileID(Loc);
   const SrcMgr::ExpansionInfo &Expansion = getSLocEntry(FID).getExpansion();
-  if (!Expansion.isMacroArgExpansion()) return false;
-
-  if (StartLoc)
-    *StartLoc = Expansion.getExpansionLocStart();
-  return true;
+  return Expansion.isMacroArgExpansion();
 }
 
 bool SourceManager::isMacroBodyExpansion(SourceLocation Loc) const {
@@ -1402,7 +1403,7 @@ unsigned SourceManager::getPresumedLineNumber(SourceLocation Loc,
 /// considered to be from a system header.
 SrcMgr::CharacteristicKind
 SourceManager::getFileCharacteristic(SourceLocation Loc) const {
-  assert(Loc.isValid() && "Can't get file characteristic of invalid loc!");
+  assert(!Loc.isInvalid() && "Can't get file characteristic of invalid loc!");
   std::pair<FileID, unsigned> LocInfo = getDecomposedExpansionLoc(Loc);
   bool Invalid = false;
   const SLocEntry &SEntry = getSLocEntry(LocInfo.first, &Invalid);
@@ -1607,7 +1608,7 @@ FileID SourceManager::translateFile(const FileEntry *SourceFile) const {
   // location in the main file.
   Optional<llvm::sys::fs::UniqueID> SourceFileUID;
   Optional<StringRef> SourceFileName;
-  if (MainFileID.isValid()) {
+  if (!MainFileID.isInvalid()) {
     bool Invalid = false;
     const SLocEntry &MainSLoc = getSLocEntry(MainFileID, &Invalid);
     if (Invalid)
@@ -1780,7 +1781,7 @@ SourceLocation SourceManager::translateLineCol(FileID FID,
 ///     110 -> SourceLocation()
 void SourceManager::computeMacroArgsCache(MacroArgsMap *&CachePtr,
                                           FileID FID) const {
-  assert(FID.isValid());
+  assert(!FID.isInvalid());
   assert(!CachePtr);
 
   CachePtr = new MacroArgsMap();

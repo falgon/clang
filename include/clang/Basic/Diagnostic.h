@@ -1076,14 +1076,14 @@ operator<<(const DiagnosticBuilder &DB, T *DC) {
 }
 
 inline const DiagnosticBuilder &operator<<(const DiagnosticBuilder &DB,
-                                           SourceRange R) {
+                                           const SourceRange &R) {
   DB.AddSourceRange(CharSourceRange::getTokenRange(R));
   return DB;
 }
 
 inline const DiagnosticBuilder &operator<<(const DiagnosticBuilder &DB,
                                            ArrayRef<SourceRange> Ranges) {
-  for (SourceRange R : Ranges)
+  for (const SourceRange &R: Ranges)
     DB.AddSourceRange(CharSourceRange::getTokenRange(R));
   return DB;
 }

@@ -6599,8 +6599,6 @@ InitializationSequence::Perform(Sema &S,
 
     case SK_CAssignment: {
       QualType SourceType = CurInit.get()->getType();
-      // Save off the initial CurInit in case we need to emit a diagnostic
-      ExprResult InitialCurInit = CurInit;
       ExprResult Result = CurInit;
       Sema::AssignConvertType ConvTy =
         S.CheckSingleAssignmentConstraints(Step->Type, Result, true,
@@ -6623,7 +6621,7 @@ InitializationSequence::Perform(Sema &S,
       bool Complained;
       if (S.DiagnoseAssignmentResult(ConvTy, Kind.getLocation(),
                                      Step->Type, SourceType,
-                                     InitialCurInit.get(),
+                                     CurInit.get(),
                                      getAssignmentAction(Entity, true),
                                      &Complained)) {
         PrintInitLocationNote(S, Entity);
@@ -7049,12 +7047,10 @@ bool InitializationSequence::Diagnose(Sema &S,
     SourceRange R;
 
     auto *InitList = dyn_cast<InitListExpr>(Args[0]);
-    if (InitList && InitList->getNumInits() >= 1) {
+    if (InitList && InitList->getNumInits() == 1)
       R = SourceRange(InitList->getInit(0)->getLocEnd(), InitList->getLocEnd());
-    } else {
-      assert(Args.size() > 1 && "Expected multiple initializers!");
+    else
       R = SourceRange(Args.front()->getLocEnd(), Args.back()->getLocEnd());
-    }
 
     R.setBegin(S.getLocForEndOfToken(R.getBegin()));
     if (Kind.isCStyleOrFunctionalCast())

@@ -163,7 +163,6 @@ class Parser : public CodeCompletionHandler {
   std::unique_ptr<PragmaHandler> MSConstSeg;
   std::unique_ptr<PragmaHandler> MSCodeSeg;
   std::unique_ptr<PragmaHandler> MSSection;
-  std::unique_ptr<PragmaHandler> MSRuntimeChecks;
   std::unique_ptr<PragmaHandler> OptimizeHandler;
   std::unique_ptr<PragmaHandler> LoopHintHandler;
   std::unique_ptr<PragmaHandler> UnrollHintHandler;
@@ -1226,7 +1225,11 @@ private:
   };
 
   DeclGroupPtrTy ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
-                                          ParsingDeclSpec *DS = nullptr);
+                                          ParsingDeclSpec *DS = nullptr
+										  /*@@*/, bool destroyTemplateIds = true/*@@*/);
+//@@
+  DeclGroupPtrTy ParseMetaGeneratedDecl();
+//@@
   bool isDeclarationAfterDeclarator();
   bool isStartOfFunctionDefinition(const ParsingDeclarator &Declarator);
   DeclGroupPtrTy ParseDeclarationOrFunctionDefinition(
@@ -1253,12 +1256,12 @@ private:
   DeclGroupPtrTy ParseObjCAtClassDeclaration(SourceLocation atLoc);
   Decl *ParseObjCAtInterfaceDeclaration(SourceLocation AtLoc,
                                         ParsedAttributes &prefixAttrs);
-  class ObjCTypeParamListScope;
   ObjCTypeParamList *parseObjCTypeParamList();
   ObjCTypeParamList *parseObjCTypeParamListOrProtocolRefs(
-      ObjCTypeParamListScope &Scope, SourceLocation &lAngleLoc,
-      SmallVectorImpl<IdentifierLocPair> &protocolIdents,
-      SourceLocation &rAngleLoc, bool mayBeProtocolList = true);
+                           SourceLocation &lAngleLoc,
+                           SmallVectorImpl<IdentifierLocPair> &protocolIdents,
+                           SourceLocation &rAngleLoc,
+                           bool mayBeProtocolList = true);
 
   void HelperActionsForIvarDeclarations(Decl *interfaceDecl, SourceLocation atLoc,
                                         BalancedDelimiterTracker &T,
@@ -1394,6 +1397,13 @@ public:
                                   void *Info,
                                   bool IsUnevaluated);
 
+//@@
+  ExprResult ParseMetaGeneratedInnerExpr();
+  ExprResult ParseMetaGeneratedExpr();
+  IdentifierInfo *ParseMetaGeneratedIdentifier(SourceLocation *Loc = nullptr);
+  IdentifierInfo *ParseIdentifier(SourceLocation *Loc = nullptr);
+  bool ParseQuotedElements(QuotedElements *Elems, tok::TokenKind End);
+//@@
 private:
   ExprResult ParseExpressionWithLeadingAt(SourceLocation AtLoc);
 
@@ -1580,9 +1590,7 @@ private:
                          SourceLocation Loc, bool ConvertToBoolean);
 
   //===--------------------------------------------------------------------===//
-  // C++ Coroutines
-
-  ExprResult ParseCoyieldExpression();
+  // C++ types
 
   //===--------------------------------------------------------------------===//
   // C99 6.7.8: Initialization.
@@ -1663,6 +1671,9 @@ private:
                                  Decl *&DeclResult,
                                  SourceLocation Loc,
                                  bool ConvertToBoolean);
+  //@@
+  StmtResult ParseExecuteStatement();
+  //@@
   StmtResult ParseIfStatement(SourceLocation *TrailingElseLoc);
   StmtResult ParseSwitchStatement(SourceLocation *TrailingElseLoc);
   StmtResult ParseWhileStatement(SourceLocation *TrailingElseLoc);
@@ -1792,6 +1803,10 @@ private:
 
     bool ParsedForRangeDecl() { return !ColonLoc.isInvalid(); }
   };
+
+//@@
+  Decl *ParsePreprocessorDirectiveDecl();
+//@@
 
   DeclGroupPtrTy ParseDeclaration(unsigned Context, SourceLocation &DeclEnd,
                                   ParsedAttributesWithRange &attrs);
@@ -2025,6 +2040,10 @@ private:
   TPResult TryParseFunctionDeclarator();
   TPResult TryParseBracketDeclarator();
   TPResult TryConsumeDeclarationSpecifier();
+//@@
+  TPResult TryParseMetaGeneratedExpr();
+  bool IsMetaGeneratedDecl();
+//@@
 
 public:
   TypeResult ParseTypeName(SourceRange *Range = nullptr,
@@ -2168,7 +2187,8 @@ private:
   void MaybeParseMicrosoftDeclSpecs(ParsedAttributes &Attrs,
                                     SourceLocation *End = nullptr) {
     const auto &LO = getLangOpts();
-    if (LO.DeclSpecKeyword && Tok.is(tok::kw___declspec))
+    if ((LO.MicrosoftExt || LO.Borland || LO.CUDA) &&
+        Tok.is(tok::kw___declspec))
       ParseMicrosoftDeclSpecs(Attrs, End);
   }
   void ParseMicrosoftDeclSpecs(ParsedAttributes &Attrs,
@@ -2365,7 +2385,6 @@ private:
   Decl *ParseNamespaceAlias(SourceLocation NamespaceLoc,
                             SourceLocation AliasLoc, IdentifierInfo *Alias,
                             SourceLocation &DeclEnd);
-
   //===--------------------------------------------------------------------===//
   // C++ 9: classes [class] and C structs/unions.
   bool isValidAfterTypeSpecifier(bool CouldBeBitfield);
@@ -2557,14 +2576,6 @@ private:
   //===--------------------------------------------------------------------===//
   // Modules
   DeclGroupPtrTy ParseModuleImport(SourceLocation AtLoc);
-  bool parseMisplacedModuleImport();
-  bool tryParseMisplacedModuleImport() {
-    tok::TokenKind Kind = Tok.getKind();
-    if (Kind == tok::annot_module_begin || Kind == tok::annot_module_end ||
-        Kind == tok::annot_module_include)
-      return parseMisplacedModuleImport();
-    return false;
-  }
 
   //===--------------------------------------------------------------------===//
   // C++11/G++: Type Traits [Type-Traits.html in the GCC manual]

@@ -1,13 +1,12 @@
 // RUN: %clang_cc1 %s -std=c++11 -triple=x86_64-apple-darwin10 -emit-llvm -o - | FileCheck %s --check-prefix=CHECK --check-prefix=NORMAL
-// RUN: %clang_cc1 %s -std=c++11 -fms-compatibility -triple=x86_64-pc-win32 -emit-llvm -o - | FileCheck %s --check-prefix=CHECK --check-prefix=MSVCCOMPAT
+// RUN: %clang_cc1 %s -std=c++11 -fms-compatibility -triple=x86_64-apple-darwin10 -emit-llvm -o - | FileCheck %s --check-prefix=CHECK --check-prefix=MSVCCOMPAT
 // CHECK: ; ModuleID 
 
 struct A {
     inline void f();
 };
 
-// NORMAL-NOT: define void @_ZN1A1fEv
-// MSVCCOMPAT-NOT: define void @"\01?f@A@@QEAAXXZ"
+// CHECK-NOT: define void @_ZN1A1fEv
 void A::f() { }
 
 template<typename> struct B { };
@@ -16,21 +15,18 @@ template<> struct B<char> {
   inline void f();
 };
 
-// NORMAL-NOT: _ZN1BIcE1fEv
-// MSVCCOMPAT-NOT: @"\01?f@?$B@D@@QEAAXXZ"
+// CHECK-NOT: _ZN1BIcE1fEv
 void B<char>::f() { }
 
 // We need a final CHECK line here.
 
-// NORMAL-LABEL: define void @_Z1fv
-// MSVCCOMPAT-LABEL: define void @"\01?f@@YAXXZ"
+// CHECK-LABEL: define void @_Z1fv
 void f() { }
 
 // <rdar://problem/8740363>
 inline void f1(int);
 
-// NORMAL-LABEL: define linkonce_odr void @_Z2f1i
-// MSVCCOMPAT-LABEL: define linkonce_odr void @"\01?f1@@YAXH@Z"
+// CHECK-LABEL: define linkonce_odr void @_Z2f1i
 void f1(int) { }
 
 void test_f1() { f1(17); }
@@ -43,8 +39,7 @@ namespace test1 {
     void g() {}
   };
 
-  // NORMAL-LABEL: define linkonce_odr void @_ZN5test11C4funcEv(
-  // MSVCCOMPAT-LABEL: define linkonce_odr void @"\01?func@C@test1@@QEAAXXZ"(
+  // CHECK-LABEL: define linkonce_odr void @_ZN5test11C4funcEv(
 
   class C {
   public:
@@ -71,65 +66,59 @@ namespace test2 {
     A a;
     f(a);
   }
-  // NORMAL-LABEL: define linkonce_odr void @_ZN5test21fERKNS_1AE
-  // MSVCCOMPAT-LABEL: define linkonce_odr void @"\01?f@test2@@YAXAEBUA@1@@Z"
+  // CHECK-LABEL: define linkonce_odr void @_ZN5test21fERKNS_1AE
 }
 
+// MSVCCOMPAT-LABEL: define weak_odr void @_Z17ExternAndInlineFnv
 // NORMAL-NOT: _Z17ExternAndInlineFnv
-// MSVCCOMPAT-LABEL: define weak_odr void @"\01?ExternAndInlineFn@@YAXXZ"
 extern inline void ExternAndInlineFn() {}
 
+// MSVCCOMPAT-LABEL: define weak_odr void @_Z18InlineThenExternFnv
 // NORMAL-NOT: _Z18InlineThenExternFnv
-// MSVCCOMPAT-LABEL: define weak_odr void @"\01?InlineThenExternFn@@YAXXZ"
 inline void InlineThenExternFn() {}
 extern void InlineThenExternFn();
 
-// NORMAL-LABEL: define void @_Z18ExternThenInlineFnv
-// MSVCCOMPAT-LABEL: define void @"\01?ExternThenInlineFn@@YAXXZ"
+// CHECK-LABEL: define void @_Z18ExternThenInlineFnv
 extern void ExternThenInlineFn() {}
 
+// MSVCCOMPAT-LABEL: define weak_odr void @_Z25ExternThenInlineThenDefFnv
 // NORMAL-NOT: _Z25ExternThenInlineThenDefFnv
-// MSVCCOMPAT-LABEL: define weak_odr void @"\01?ExternThenInlineThenDefFn@@YAXXZ"
 extern void ExternThenInlineThenDefFn();
 inline void ExternThenInlineThenDefFn();
 void ExternThenInlineThenDefFn() {}
 
+// MSVCCOMPAT-LABEL: define weak_odr void @_Z25InlineThenExternThenDefFnv
 // NORMAL-NOT: _Z25InlineThenExternThenDefFnv
-// MSVCCOMPAT-LABEL: define weak_odr void @"\01?InlineThenExternThenDefFn@@YAXXZ"
 inline void InlineThenExternThenDefFn();
 extern void InlineThenExternThenDefFn();
 void InlineThenExternThenDefFn() {}
 
+// MSVCCOMPAT-LABEL: define weak_odr i32 @_Z20ExternAndConstexprFnv
 // NORMAL-NOT: _Z17ExternAndConstexprFnv
-// MSVCCOMPAT-LABEL: define weak_odr i32 @"\01?ExternAndConstexprFn@@YAHXZ"
 extern constexpr int ExternAndConstexprFn() { return 0; }
 
-// NORMAL-NOT: _Z11ConstexprFnv
-// MSVCCOMPAT-NOT: @"\01?ConstexprFn@@YAHXZ"
+// CHECK-NOT: _Z11ConstexprFnv
 constexpr int ConstexprFn() { return 0; }
 
 template <typename T>
 extern inline void ExternInlineOnPrimaryTemplate(T);
 
-// NORMAL-LABEL: define void @_Z29ExternInlineOnPrimaryTemplateIiEvT_
-// MSVCCOMPAT-LABEL: define void @"\01??$ExternInlineOnPrimaryTemplate@H@@YAXH@Z"
+// CHECK-LABEL: define void @_Z29ExternInlineOnPrimaryTemplateIiEvT_
 template <>
 void ExternInlineOnPrimaryTemplate(int) {}
 
 template <typename T>
 extern inline void ExternInlineOnPrimaryTemplateAndSpecialization(T);
 
+// MSVCCOMPAT-LABEL: define weak_odr void @_Z46ExternInlineOnPrimaryTemplateAndSpecializationIiEvT_
 // NORMAL-NOT: _Z46ExternInlineOnPrimaryTemplateAndSpecializationIiEvT_
-// MSVCCOMPAT-LABEL: define weak_odr void @"\01??$ExternInlineOnPrimaryTemplateAndSpecialization@H@@YAXH@Z"
 template <>
 extern inline void ExternInlineOnPrimaryTemplateAndSpecialization(int) {}
 
 struct TypeWithInlineMethods {
-  // NORMAL-NOT: _ZN21TypeWithInlineMethods9StaticFunEv
-  // MSVCCOMPAT-NOT: @"\01?StaticFun@TypeWithInlineMethods@@SAXXZ"
+  // CHECK-NOT: _ZN21TypeWithInlineMethods9StaticFunEv
   static void StaticFun() {}
-  // NORMAL-NOT: _ZN21TypeWithInlineMethods12NonStaticFunEv
-  // MSVCCOMPAT-NOT: @"\01?NonStaticFun@TypeWithInlineMethods@@QEAAXXZ"
+  // CHECK-NOT: _ZN21TypeWithInlineMethods12NonStaticFunEv
   void NonStaticFun() { StaticFun(); }
 };
 
@@ -145,6 +134,5 @@ struct S {
 };
 
 __attribute__((used)) inline S<int> Foo() { return S<int>(); }
-// NORMAL-LABEL: define linkonce_odr void @_ZN7PR229593FooEv(
-// MSVCCOMPAT-LABEL: define linkonce_odr i8 @"\01?Foo@PR22959@@YA?AU?$S@H@1@XZ"(
+// CHECK-LABEL: define linkonce_odr void @_ZN7PR229593FooEv(
 }

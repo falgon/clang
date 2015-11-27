@@ -3775,6 +3775,147 @@ public:
   static bool classofKind(Kind K) { return K == Import; }
 };
 
+//@@
+/// \brief Represents an escape Decl (.~expr;).
+class EscapeDecl : public Decl {
+  Expr *expr;
+  SourceLocation EndLoc;
+
+  virtual void anchor();
+  EscapeDecl(DeclContext *DC, Expr* E, SourceLocation L, SourceLocation EL)
+    : Decl(Escape, DC, L), expr(E), EndLoc(EL) { }
+
+public:
+  Expr *getExpr() { return expr; }
+  const Expr *getExpr() const { return expr; }
+  void setExpr(Expr *E) { expr = E; }
+
+  SourceRange getSourceRange() const override LLVM_READONLY;
+  SourceRange getInnerSourceRange() const LLVM_READONLY;
+
+  static EscapeDecl *Create(ASTContext &C, DeclContext *DC,
+                           Expr *E, SourceLocation SL, SourceLocation EL);
+  static EscapeDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == Escape; }
+};
+
+/// \brief Represents an inline Decl (.!expr;).
+class InlineDecl : public Decl {
+  Expr *expr;
+  SourceLocation EndLoc;
+
+  virtual void anchor();
+  InlineDecl(DeclContext *DC, Expr* E, SourceLocation L, SourceLocation EL)
+    : Decl(Inline, DC, L), expr(E), EndLoc(EL) { }
+
+public:
+  Expr *getExpr() { return expr; }
+  const Expr *getExpr() const { return expr; }
+  void setExpr(Expr *E) { expr = E; }
+
+  SourceRange getSourceRange() const override LLVM_READONLY;
+  SourceRange getInnerSourceRange() const LLVM_READONLY;
+
+  static InlineDecl *Create(ASTContext &C, DeclContext *DC,
+                           Expr *E, SourceLocation SL, SourceLocation EL);
+  static InlineDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == Inline; }
+};
+
+/// \brief Represents an execute Decl (.&stmt_or_decl).
+class ExecuteDecl : public Decl, public DeclContext {
+  Stmt *stmt;
+  SourceLocation EndLoc;
+
+  virtual void anchor();
+  ExecuteDecl(DeclContext *DC, Stmt* S, SourceLocation L)
+    : Decl(Execute, DC, L), DeclContext(Execute), stmt(S) { }
+
+public:
+  Stmt *getStmt() { return stmt; }
+  const Stmt *getStmt() const { return stmt; }
+  void setStmt(Stmt *S) { stmt = S; }
+
+  SourceRange getSourceRange() const override LLVM_READONLY;
+  SourceRange getInnerSourceRange() const LLVM_READONLY;
+
+  void setEndLoc(SourceLocation L) { EndLoc = L; }
+
+  static ExecuteDecl *Create(ASTContext &C, DeclContext *DC,
+                           Stmt* S, SourceLocation L);
+  static ExecuteDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == Execute; }
+};
+
+/// \brief Represents an def Decl (.@decl).
+class DefDecl : public Decl, public DeclContext {
+  SourceLocation EndLoc;
+
+  virtual void anchor();
+  DefDecl(DeclContext *DC, SourceLocation L)
+    : Decl(Def, DC, L), DeclContext(Def) { }
+
+public:
+  SourceRange getSourceRange() const override LLVM_READONLY;
+  SourceRange getInnerSourceRange() const LLVM_READONLY;
+
+  void setEndLoc(SourceLocation L) { EndLoc = L; }
+
+  static DefDecl *Create(ASTContext &C, DeclContext *DC, SourceLocation L);
+  static DefDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == Def; }
+};
+
+/// \brief Represents a preprocessor Decl, (#directive)
+/// that is verbatimely copied into stage code.
+class PreprocessorDirectiveDecl : public Decl {
+  StringRef Directive;
+  SourceLocation EndLoc;
+
+  virtual void anchor();
+  PreprocessorDirectiveDecl(DeclContext *DC, StringRef D,
+	  SourceLocation StartLoc, SourceLocation EndLoc)
+    : Decl(PreprocessorDirective, DC, StartLoc), Directive(D), EndLoc(EndLoc) {}
+
+public:
+  StringRef& getDirective() { return Directive; }
+  const StringRef& getDirective() const { return Directive; }
+  void setDirective(const StringRef& D) { Directive = D; }
+
+  SourceRange getSourceRange() const override LLVM_READONLY;
+
+  static PreprocessorDirectiveDecl *Create(ASTContext &C, DeclContext *DC,
+                         const StringRef& D, SourceLocation SL, SourceLocation EL);
+  static PreprocessorDirectiveDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == PreprocessorDirective; }
+};
+
+/// \brief Represents a QuasiQuotes DeclContext (.<...>.).
+/// that stores all declaration within the QuasiQuotes.
+class QuasiQuotesDecl : public Decl, public DeclContext {
+  virtual void anchor();
+  QuasiQuotesDecl(DeclContext *DC, SourceLocation L)
+    : Decl(QuasiQuotes, DC, L), DeclContext(QuasiQuotes) { }
+
+public:
+  static QuasiQuotesDecl *Create(ASTContext &C, DeclContext *DC, SourceLocation L);
+  static QuasiQuotesDecl *CreateDeserialized(ASTContext &C, unsigned ID);
+
+  static bool classof(const Decl *D) { return classofKind(D->getKind()); }
+  static bool classofKind(Kind K) { return K == QuasiQuotes; }
+};
+//@@
+
 /// \brief Represents an empty-declaration.
 class EmptyDecl : public Decl {
   virtual void anchor();

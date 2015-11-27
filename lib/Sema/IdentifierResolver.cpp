@@ -141,8 +141,12 @@ bool IdentifierResolver::isDeclInScope(Decl *D, DeclContext *Ctx, Scope *S,
 /// AddDecl - Link the decl to its shadowed decl chain.
 void IdentifierResolver::AddDecl(NamedDecl *D) {
   DeclarationName Name = D->getDeclName();
-  if (IdentifierInfo *II = Name.getAsIdentifierInfo())
+  if (IdentifierInfo *II = Name.getAsIdentifierInfo()) {
     updatingIdentifier(*II);
+//@@
+    if (II->isMetaGenerated()) return;
+//@@
+  }
 
   void *Ptr = Name.getFETokenInfo<void>();
 
@@ -166,8 +170,12 @@ void IdentifierResolver::AddDecl(NamedDecl *D) {
 
 void IdentifierResolver::InsertDeclAfter(iterator Pos, NamedDecl *D) {
   DeclarationName Name = D->getDeclName();
-  if (IdentifierInfo *II = Name.getAsIdentifierInfo())
+  if (IdentifierInfo *II = Name.getAsIdentifierInfo()) {
     updatingIdentifier(*II);
+//@@
+    if (II->isMetaGenerated()) return;
+//@@
+  }
   
   void *Ptr = Name.getFETokenInfo<void>();
   
@@ -207,8 +215,12 @@ void IdentifierResolver::InsertDeclAfter(iterator Pos, NamedDecl *D) {
 void IdentifierResolver::RemoveDecl(NamedDecl *D) {
   assert(D && "null param passed");
   DeclarationName Name = D->getDeclName();
-  if (IdentifierInfo *II = Name.getAsIdentifierInfo())
+  if (IdentifierInfo *II = Name.getAsIdentifierInfo()) {
     updatingIdentifier(*II);
+//@@
+    if (II->isMetaGenerated()) return;
+//@@
+  }
 
   void *Ptr = Name.getFETokenInfo<void>();
 
@@ -226,8 +238,12 @@ void IdentifierResolver::RemoveDecl(NamedDecl *D) {
 /// begin - Returns an iterator for decls with name 'Name'.
 IdentifierResolver::iterator
 IdentifierResolver::begin(DeclarationName Name) {
-  if (IdentifierInfo *II = Name.getAsIdentifierInfo())
+  if (IdentifierInfo *II = Name.getAsIdentifierInfo()) {
     readingIdentifier(*II);
+//@@
+    if (II->isMetaGenerated()) return end();
+//@@
+  }
     
   void *Ptr = Name.getFETokenInfo<void>();
   if (!Ptr) return end();
@@ -296,8 +312,12 @@ static DeclMatchKind compareDeclarations(NamedDecl *Existing, NamedDecl *New) {
 }
 
 bool IdentifierResolver::tryAddTopLevelDecl(NamedDecl *D, DeclarationName Name){
-  if (IdentifierInfo *II = Name.getAsIdentifierInfo())
+  if (IdentifierInfo *II = Name.getAsIdentifierInfo()) {
     readingIdentifier(*II);
+//@@
+    if (II->isMetaGenerated()) return false;
+//@@
+  }
   
   void *Ptr = Name.getFETokenInfo<void>();
     
@@ -392,6 +412,10 @@ void IdentifierResolver::updatingIdentifier(IdentifierInfo &II) {
 /// It creates a new IdDeclInfo if one was not created before for this id.
 IdentifierResolver::IdDeclInfo &
 IdentifierResolver::IdDeclInfoMap::operator[](DeclarationName Name) {
+//@@
+  assert(!Name.getAsIdentifierInfo() ||
+         !Name.getAsIdentifierInfo()->isMetaGenerated());
+//@@
   void *Ptr = Name.getFETokenInfo<void>();
 
   if (Ptr) return *toIdDeclInfo(Ptr);
@@ -410,6 +434,10 @@ IdentifierResolver::IdDeclInfoMap::operator[](DeclarationName Name) {
 
 void IdentifierResolver::iterator::incrementSlowCase() {
   NamedDecl *D = **this;
+//@@
+  assert(!D->getDeclName().getAsIdentifierInfo() ||
+         !D->getDeclName().getAsIdentifierInfo()->isMetaGenerated());
+//@@
   void *InfoPtr = D->getDeclName().getFETokenInfo<void>();
   assert(!isDeclPtr(InfoPtr) && "Decl with wrong id ?");
   IdDeclInfo *Info = toIdDeclInfo(InfoPtr);

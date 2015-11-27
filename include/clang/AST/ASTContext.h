@@ -70,7 +70,6 @@ namespace clang {
   class VTableContextBase;
 
   namespace Builtin { class Context; }
-  enum BuiltinTemplateKind : int;
 
   namespace comments {
     class FullComment;
@@ -217,9 +216,6 @@ class ASTContext : public RefCountedBase<ASTContext> {
   /// __builtin_va_list type.
   mutable TypedefDecl *BuiltinVaListDecl;
 
-  /// The typedef for the predefined \c __builtin_ms_va_list type.
-  mutable TypedefDecl *BuiltinMSVaListDecl;
-
   /// \brief The typedef for the predefined \c id type.
   mutable TypedefDecl *ObjCIdDecl;
   
@@ -246,9 +242,6 @@ class ASTContext : public RefCountedBase<ASTContext> {
 
   /// The identifier 'NSCopying'.
   IdentifierInfo *NSCopyingName = nullptr;
-
-  /// The identifier '__make_integer_seq'.
-  mutable IdentifierInfo *MakeIntegerSeqName = nullptr;
 
   QualType ObjCConstantStringType;
   mutable RecordDecl *CFConstantStringTypeDecl;
@@ -403,7 +396,6 @@ private:
   
   TranslationUnitDecl *TUDecl;
   mutable ExternCContextDecl *ExternCContext;
-  mutable BuiltinTemplateDecl *MakeIntegerSeqDecl;
 
   /// \brief The associated SourceManager object.a
   SourceManager &SourceMgr;
@@ -442,7 +434,6 @@ private:
   friend class CXXRecordDecl;
 
   const TargetInfo *Target;
-  const TargetInfo *AuxTarget;
   clang::PrintingPolicy PrintingPolicy;
   
 public:
@@ -456,59 +447,10 @@ public:
   /// \brief Contains parents of a node.
   typedef llvm::SmallVector<ast_type_traits::DynTypedNode, 2> ParentVector;
 
-  /// \brief Maps from a node to its parents. This is used for nodes that have
-  /// pointer identity only, which are more common and we can save space by
-  /// only storing a unique pointer to them.
+  /// \brief Maps from a node to its parents.
   typedef llvm::DenseMap<const void *,
-                         llvm::PointerUnion4<const Decl *, const Stmt *,
-                                             ast_type_traits::DynTypedNode *,
-                                             ParentVector *>> ParentMapPointers;
-
-  /// Parent map for nodes without pointer identity. We store a full
-  /// DynTypedNode for all keys.
-  typedef llvm::DenseMap<
-      ast_type_traits::DynTypedNode,
-      llvm::PointerUnion4<const Decl *, const Stmt *,
-                          ast_type_traits::DynTypedNode *, ParentVector *>>
-      ParentMapOtherNodes;
-
-  /// Container for either a single DynTypedNode or for an ArrayRef to
-  /// DynTypedNode. For use with ParentMap.
-  class DynTypedNodeList {
-    typedef ast_type_traits::DynTypedNode DynTypedNode;
-    llvm::AlignedCharArrayUnion<ast_type_traits::DynTypedNode,
-                                ArrayRef<DynTypedNode>> Storage;
-    bool IsSingleNode;
-
-  public:
-    DynTypedNodeList(const DynTypedNode &N) : IsSingleNode(true) {
-      new (Storage.buffer) DynTypedNode(N);
-    }
-    DynTypedNodeList(ArrayRef<DynTypedNode> A) : IsSingleNode(false) {
-      new (Storage.buffer) ArrayRef<DynTypedNode>(A);
-    }
-
-    const ast_type_traits::DynTypedNode *begin() const {
-      if (!IsSingleNode)
-        return reinterpret_cast<const ArrayRef<DynTypedNode> *>(Storage.buffer)
-            ->begin();
-      return reinterpret_cast<const DynTypedNode *>(Storage.buffer);
-    }
-
-    const ast_type_traits::DynTypedNode *end() const {
-      if (!IsSingleNode)
-        return reinterpret_cast<const ArrayRef<DynTypedNode> *>(Storage.buffer)
-            ->end();
-      return reinterpret_cast<const DynTypedNode *>(Storage.buffer) + 1;
-    }
-
-    size_t size() const { return end() - begin(); }
-    bool empty() const { return begin() == end(); }
-    const DynTypedNode &operator[](size_t N) const {
-      assert(N < size() && "Out of bounds!");
-      return *(begin() + N);
-    }
-  };
+                         llvm::PointerUnion<ast_type_traits::DynTypedNode *,
+                                            ParentVector *>> ParentMap;
 
   /// \brief Returns the parents of the given node.
   ///
@@ -534,11 +476,13 @@ public:
   ///
   /// 'NodeT' can be one of Decl, Stmt, Type, TypeLoc,
   /// NestedNameSpecifier or NestedNameSpecifierLoc.
-  template <typename NodeT> DynTypedNodeList getParents(const NodeT &Node) {
+  template <typename NodeT>
+  ArrayRef<ast_type_traits::DynTypedNode> getParents(const NodeT &Node) {
     return getParents(ast_type_traits::DynTypedNode::create(Node));
   }
 
-  DynTypedNodeList getParents(const ast_type_traits::DynTypedNode &Node);
+  ArrayRef<ast_type_traits::DynTypedNode>
+  getParents(const ast_type_traits::DynTypedNode &Node);
 
   const clang::PrintingPolicy &getPrintingPolicy() const {
     return PrintingPolicy;
@@ -576,8 +520,7 @@ public:
   }
 
   const TargetInfo &getTargetInfo() const { return *Target; }
-  const TargetInfo *getAuxTargetInfo() const { return AuxTarget; }
-
+  
   /// getIntTypeForBitwidth -
   /// sets integer QualTy according to specified details:
   /// bitwidth, signed/unsigned.
@@ -873,7 +816,6 @@ public:
   TranslationUnitDecl *getTranslationUnitDecl() const { return TUDecl; }
 
   ExternCContextDecl *getExternCContextDecl() const;
-  BuiltinTemplateDecl *getMakeIntegerSeqDecl() const;
 
   // Builtin Types.
   CanQualType VoidTy;
@@ -897,12 +839,9 @@ public:
   CanQualType ObjCBuiltinIdTy, ObjCBuiltinClassTy, ObjCBuiltinSelTy;
   CanQualType ObjCBuiltinBoolTy;
   CanQualType OCLImage1dTy, OCLImage1dArrayTy, OCLImage1dBufferTy;
-  CanQualType OCLImage2dTy, OCLImage2dArrayTy, OCLImage2dDepthTy;
-  CanQualType OCLImage2dArrayDepthTy, OCLImage2dMSAATy, OCLImage2dArrayMSAATy;
-  CanQualType OCLImage2dMSAADepthTy, OCLImage2dArrayMSAADepthTy;
+  CanQualType OCLImage2dTy, OCLImage2dArrayTy;
   CanQualType OCLImage3dTy;
-  CanQualType OCLSamplerTy, OCLEventTy, OCLClkEventTy;
-  CanQualType OCLQueueTy, OCLNDRangeTy, OCLReserveIDTy;
+  CanQualType OCLSamplerTy, OCLEventTy;
   CanQualType OMPArraySectionTy;
 
   // Types for deductions in C++0x [stmt.ranged]'s desugaring. Built on demand.
@@ -946,9 +885,6 @@ public:
 
   void PrintStats() const;
   const SmallVectorImpl<Type *>& getTypes() const { return Types; }
-
-  BuiltinTemplateDecl *buildBuiltinTemplateDecl(BuiltinTemplateKind BTK,
-                                                const IdentifierInfo *II) const;
 
   /// \brief Create a new implicit TU-level CXXRecordDecl or RecordDecl
   /// declaration.
@@ -1023,9 +959,6 @@ public:
   /// \brief Change the ExtInfo on a function type.
   const FunctionType *adjustFunctionType(const FunctionType *Fn,
                                          FunctionType::ExtInfo EInfo);
-
-  /// Adjust the given function result type.
-  CanQualType getCanonicalFunctionResultType(QualType ResultType) const;
 
   /// \brief Change the result type of a function type once it is deduced.
   void adjustDeducedFunctionResultType(FunctionDecl *FD, QualType ResultType);
@@ -1299,7 +1232,7 @@ public:
                                  UnaryTransformType::UTTKind UKind) const;
 
   /// \brief C++11 deduced auto type.
-  QualType getAutoType(QualType DeducedType, AutoTypeKeyword Keyword,
+  QualType getAutoType(QualType DeducedType, bool IsDecltypeAuto,
                        bool IsDependent) const;
 
   /// \brief C++11 deduction pattern for 'auto' type.
@@ -1451,12 +1384,6 @@ public:
     }
 
     return NSCopyingName;
-  }
-
-  IdentifierInfo *getMakeIntegerSeqName() const {
-    if (!MakeIntegerSeqName)
-      MakeIntegerSeqName = &Idents.get("__make_integer_seq");
-    return MakeIntegerSeqName;
   }
 
   /// \brief Retrieve the Objective-C "instancetype" type, if already known;
@@ -1648,15 +1575,6 @@ public:
   /// \c __va_list_tag type used to help define the \c __builtin_va_list type
   /// for some targets.
   Decl *getVaListTagDecl() const;
-
-  /// Retrieve the C type declaration corresponding to the predefined
-  /// \c __builtin_ms_va_list type.
-  TypedefDecl *getBuiltinMSVaListDecl() const;
-
-  /// Retrieve the type of the \c __builtin_ms_va_list type.
-  QualType getBuiltinMSVaListType() const {
-    return getTypeDeclType(getBuiltinMSVaListDecl());
-  }
 
   /// \brief Return a type with additional \c const, \c volatile, or
   /// \c restrict qualifiers.
@@ -2274,6 +2192,16 @@ public:
   QualType getCorrespondingUnsignedType(QualType T) const;
 
   //===--------------------------------------------------------------------===//
+  //                    Type Iterators.
+  //===--------------------------------------------------------------------===//
+  typedef llvm::iterator_range<SmallVectorImpl<Type *>::const_iterator>
+    type_const_range;
+
+  type_const_range types() const {
+    return type_const_range(Types.begin(), Types.end());
+  }
+
+  //===--------------------------------------------------------------------===//
   //                    Integer Values
   //===--------------------------------------------------------------------===//
 
@@ -2472,10 +2400,9 @@ public:
   /// This routine may only be invoked once for a given ASTContext object.
   /// It is normally invoked after ASTContext construction.
   ///
-  /// \param Target The target
-  void InitBuiltinTypes(const TargetInfo &Target,
-                        const TargetInfo *AuxTarget = nullptr);
-
+  /// \param Target The target 
+  void InitBuiltinTypes(const TargetInfo &Target);
+  
 private:
   void InitBuiltinType(CanQualType &R, BuiltinType::Kind K);
 
@@ -2528,8 +2455,7 @@ private:
   void ReleaseDeclContextMaps();
   void ReleaseParentMapEntries();
 
-  std::unique_ptr<ParentMapPointers> PointerParents;
-  std::unique_ptr<ParentMapOtherNodes> OtherParents;
+  std::unique_ptr<ParentMap> AllParents;
 
   std::unique_ptr<VTableContextBase> VTContext;
 

@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -verify -fopenmp -x c++ -triple x86_64-unknown-unknown -emit-llvm %s -fexceptions -fcxx-exceptions -o - | FileCheck %s
 // RUN: %clang_cc1 -fopenmp -x c++ -std=c++11 -triple x86_64-unknown-unknown -fexceptions -fcxx-exceptions -emit-pch -o %t %s
-// RUN: %clang_cc1 -fopenmp -x c++ -triple x86_64-unknown-unknown -fexceptions -fcxx-exceptions -debug-info-kind=limited -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s
-// RUN: %clang_cc1 -verify -triple x86_64-apple-darwin10 -fopenmp -fexceptions -fcxx-exceptions -debug-info-kind=line-tables-only -x c++ -emit-llvm %s -o - | FileCheck %s --check-prefix=TERM_DEBUG
+// RUN: %clang_cc1 -fopenmp -x c++ -triple x86_64-unknown-unknown -fexceptions -fcxx-exceptions -g -std=c++11 -include-pch %t -verify %s -emit-llvm -o - | FileCheck %s
+// RUN: %clang_cc1 -verify -triple x86_64-apple-darwin10 -fopenmp -fexceptions -fcxx-exceptions -gline-tables-only -x c++ -emit-llvm %s -o - | FileCheck %s --check-prefix=TERM_DEBUG
 // REQUIRES: x86-registered-target
 // expected-no-diagnostics
 #ifndef HEADER
@@ -525,10 +525,8 @@ void linear(float *a) {
 //
 // Update linear vars after loop, as the loop was operating on a private version.
 // CHECK: [[K_REF:%.+]] = load i64*, i64** [[K_ADDR]],
-// CHECK: store i64* [[K_REF]], i64** [[K_PRIV_REF:%.+]],
 // CHECK: [[LIN0_2:%.+]] = load i64, i64* [[LIN0]]
 // CHECK-NEXT: [[LIN_ADD2:%.+]] = add nsw i64 [[LIN0_2]], 27
-// CHECK-NEXT: [[K_REF:%.+]] = load i64*, i64** [[K_PRIV_REF]],
 // CHECK-NEXT: store i64 [[LIN_ADD2]], i64* [[K_REF]]
 //
 
@@ -568,10 +566,8 @@ void linear(float *a) {
 //
 // Update linear vars after loop, as the loop was operating on a private version.
 // CHECK: [[K_REF:%.+]] = load i64*, i64** [[K_ADDR]],
-// CHECK: store i64* [[K_REF]], i64** [[K_PRIV_REF:%.+]],
 // CHECK: [[LIN0_2:%.+]] = load i64, i64* [[LIN0]]
 // CHECK-NEXT: [[LIN_ADD2:%.+]] = add nsw i64 [[LIN0_2]], 27
-// CHECK-NEXT: [[K_REF:%.+]] = load i64*, i64** [[K_PRIV_REF]],
 // CHECK-NEXT: store i64 [[LIN_ADD2]], i64* [[K_REF]]
 //
   #pragma omp simd linear(uval(k) : 3)

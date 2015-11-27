@@ -93,9 +93,6 @@ int main(int argc, char **argv) {
 #pragma omp task private(i)
     foo();
   }
-  static int m;
-#pragma omp task private(m) // OK
-    foo();
 
   return 0;
 }

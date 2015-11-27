@@ -343,6 +343,13 @@ struct FormatToken {
     case tok::minusminus:
     case tok::exclaim:
     case tok::tilde:
+	//@@
+	case tok::periodless:
+	case tok::periodtilde:
+	case tok::periodexclaim:
+	case tok::periodamp:
+	case tok::periodat:
+	//@@
     case tok::kw_sizeof:
     case tok::kw_alignof:
       return true;
@@ -412,16 +419,16 @@ struct FormatToken {
 
   /// \brief Returns \c true if this tokens starts a block-type list, i.e. a
   /// list that should be indented with a block indent.
-  bool opensBlockOrBlockTypeList(const FormatStyle &Style) const {
+  bool opensBlockTypeList(const FormatStyle &Style) const {
     return is(TT_ArrayInitializerLSquare) ||
            (is(tok::l_brace) &&
             (BlockKind == BK_Block || is(TT_DictLiteral) ||
              (!Style.Cpp11BracedListStyle && NestingLevel == 0)));
   }
 
-  /// \brief Same as opensBlockOrBlockTypeList, but for the closing token.
-  bool closesBlockOrBlockTypeList(const FormatStyle &Style) const {
-    return MatchingParen && MatchingParen->opensBlockOrBlockTypeList(Style);
+  /// \brief Same as opensBlockTypeList, but for the closing token.
+  bool closesBlockTypeList(const FormatStyle &Style) const {
+    return MatchingParen && MatchingParen->opensBlockTypeList(Style);
   }
 
 private:
@@ -536,11 +543,9 @@ struct AdditionalKeywords {
     kw_finally = &IdentTable.get("finally");
     kw_function = &IdentTable.get("function");
     kw_import = &IdentTable.get("import");
-    kw_let = &IdentTable.get("let");
     kw_var = &IdentTable.get("var");
 
     kw_abstract = &IdentTable.get("abstract");
-    kw_assert = &IdentTable.get("assert");
     kw_extends = &IdentTable.get("extends");
     kw_implements = &IdentTable.get("implements");
     kw_instanceof = &IdentTable.get("instanceof");
@@ -553,7 +558,6 @@ struct AdditionalKeywords {
 
     kw_mark = &IdentTable.get("mark");
 
-    kw_extend = &IdentTable.get("extend");
     kw_option = &IdentTable.get("option");
     kw_optional = &IdentTable.get("optional");
     kw_repeated = &IdentTable.get("repeated");
@@ -579,12 +583,10 @@ struct AdditionalKeywords {
   IdentifierInfo *kw_finally;
   IdentifierInfo *kw_function;
   IdentifierInfo *kw_import;
-  IdentifierInfo *kw_let;
   IdentifierInfo *kw_var;
 
   // Java keywords.
   IdentifierInfo *kw_abstract;
-  IdentifierInfo *kw_assert;
   IdentifierInfo *kw_extends;
   IdentifierInfo *kw_implements;
   IdentifierInfo *kw_instanceof;
@@ -598,7 +600,6 @@ struct AdditionalKeywords {
   IdentifierInfo *kw_mark;
 
   // Proto keywords.
-  IdentifierInfo *kw_extend;
   IdentifierInfo *kw_option;
   IdentifierInfo *kw_optional;
   IdentifierInfo *kw_repeated;

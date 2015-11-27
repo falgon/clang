@@ -142,9 +142,6 @@ int main(int argc, char **argv) {
   foo();
 #pragma omp single private(i)
   foo();
-  static int m;
-#pragma omp single private(m) // OK
-  foo();
 
   return 0;
 }

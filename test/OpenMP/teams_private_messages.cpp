@@ -122,10 +122,6 @@ int main(int argc, char **argv) {
     #pragma omp parallel private(i)
     foo();
   }
-  static int m;
-  #pragma omp target
-  #pragma omp teams private(m) // OK
-  foo();
 
   return 0;
 }

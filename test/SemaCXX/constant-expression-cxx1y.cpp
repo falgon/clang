@@ -872,7 +872,7 @@ namespace Lifetime {
 
 namespace Bitfields {
   struct A {
-    bool b : 1;
+    bool b : 3;
     int n : 4;
     unsigned u : 5;
   };

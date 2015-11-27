@@ -835,8 +835,7 @@ Decl *TemplateDeclInstantiator::VisitEnumDecl(EnumDecl *D) {
         SemaRef.SubstType(TI->getType(), TemplateArgs,
                           UnderlyingLoc, DeclarationName());
       SemaRef.CheckEnumRedeclaration(Def->getLocation(), Def->isScoped(),
-                                     DefnUnderlying,
-                                     /*EnumUnderlyingIsImplicit=*/false, Enum);
+                                     DefnUnderlying, Enum);
     }
   }
 
@@ -920,11 +919,6 @@ void TemplateDeclInstantiator::InstantiateEnumDefinition(
 
 Decl *TemplateDeclInstantiator::VisitEnumConstantDecl(EnumConstantDecl *D) {
   llvm_unreachable("EnumConstantDecls can only occur within EnumDecls.");
-}
-
-Decl *
-TemplateDeclInstantiator::VisitBuiltinTemplateDecl(BuiltinTemplateDecl *D) {
-  llvm_unreachable("BuiltinTemplateDecls cannot be instantiated.");
 }
 
 Decl *TemplateDeclInstantiator::VisitClassTemplateDecl(ClassTemplateDecl *D) {

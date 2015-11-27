@@ -835,11 +835,7 @@ void TypePrinter::printAutoBefore(const AutoType *T, raw_ostream &OS) {
   if (!T->getDeducedType().isNull()) {
     printBefore(T->getDeducedType(), OS);
   } else {
-    switch (T->getKeyword()) {
-    case AutoTypeKeyword::Auto: OS << "auto"; break;
-    case AutoTypeKeyword::DecltypeAuto: OS << "decltype(auto)"; break;
-    case AutoTypeKeyword::GNUAutoType: OS << "__auto_type"; break;
-    }
+    OS << (T->isDecltypeAuto() ? "decltype(auto)" : "auto");
     spaceBeforePlaceHolder(OS);
   }
 }
@@ -1084,11 +1080,20 @@ void TypePrinter::printParenAfter(const ParenType *T, raw_ostream &OS) {
 
 void TypePrinter::printDependentNameBefore(const DependentNameType *T,
                                            raw_ostream &OS) { 
+//@@
+  NestedNameSpecifier *NNS = T->getQualifier();
+  if (NNS || !Policy.SuppressDissambiguationKeywordsForUnqualifiedIds || T->getKeyword() != ETK_Typename) {
+//@@
   OS << TypeWithKeyword::getKeywordName(T->getKeyword());
   if (T->getKeyword() != ETK_None)
     OS << " ";
-  
-  T->getQualifier()->print(OS, Policy);
+ 
+//@@
+  }
+//@@ this was: T->getQualifier()->print(OS, Policy);
+  if (NNS)
+	  NNS->print(OS, Policy);
+//@@
   
   OS << T->getIdentifier()->getName();
   spaceBeforePlaceHolder(OS);
@@ -1103,9 +1108,18 @@ void TypePrinter::printDependentTemplateSpecializationBefore(
   OS << TypeWithKeyword::getKeywordName(T->getKeyword());
   if (T->getKeyword() != ETK_None)
     OS << " ";
-  
-  if (T->getQualifier())
-    T->getQualifier()->print(OS, Policy);    
+ 
+//@@
+//@@was: if (T->getQualifier()) T->getQualifier()->print(OS, Policy);
+  if (NestedNameSpecifier *NNS = T->getQualifier()) {
+    bool isGlobal = NNS->getKind() == NestedNameSpecifier::Global;
+	bool dissambiguate = !Policy.SuppressDissambiguationKeywordsForUnqualifiedIds;
+	if (!isGlobal || dissambiguate)
+      NNS->print(OS, Policy);
+    if (isGlobal && dissambiguate)
+      OS << "template ";
+//@@
+  }
   OS << T->getIdentifier()->getName();
   TemplateSpecializationType::PrintTemplateArgumentList(OS,
                                                         T->getArgs(),
@@ -1190,10 +1204,6 @@ void TypePrinter::printAttributedAfter(const AttributedType *T,
   SaveAndRestore<bool> MaybeSuppressCC(InsideCCAttribute, T->isCallingConv());
 
   printAfter(T->getModifiedType(), OS);
-
-  // Don't print the inert __unsafe_unretained attribute at all.
-  if (T->getAttrKind() == AttributedType::attr_objc_inert_unsafe_unretained)
-    return;
 
   // Print nullability type specifiers that occur after
   if (T->getAttrKind() == AttributedType::attr_nonnull ||

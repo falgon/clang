@@ -212,6 +212,16 @@ PUNCTUATOR(periodstar,          ".*")
 PUNCTUATOR(arrowstar,           "->*")
 PUNCTUATOR(coloncolon,          "::")
 
+//@@
+//Meta C++ Support
+PUNCTUATOR(periodless,          ".<")
+PUNCTUATOR(greaterperiod,       ">.")
+PUNCTUATOR(periodtilde,         ".~")
+PUNCTUATOR(periodexclaim,       ".!")
+PUNCTUATOR(periodamp,           ".&")
+PUNCTUATOR(periodat,            ".@")
+//@@
+
 // Objective C support.
 PUNCTUATOR(at,                  "@")
 
@@ -242,8 +252,6 @@ PUNCTUATOR(greatergreatergreater, ">>>")
 //   KEYZVECTOR - This is a keyword for the System z vector extensions,
 //                which are heavily based on AltiVec
 //   KEYBORLAND - This is a keyword if Borland extensions are enabled
-//   KEYCOROUTINES - This is a keyword if support for the C++ coroutines
-//                   TS is enabled
 //   BOOLSUPPORT - This is a keyword if 'bool' is a built-in type
 //   HALFSUPPORT - This is a keyword if 'half' is a built-in type
 //   WCHARSUPPORT - This is a keyword if 'wchar_t' is a built-in type
@@ -358,11 +366,6 @@ CXX11_KEYWORD(thread_local          , 0)
 CONCEPTS_KEYWORD(concept)
 CONCEPTS_KEYWORD(requires)
 
-// C++ coroutines TS keywords
-KEYWORD(co_await                    , KEYCOROUTINES)
-KEYWORD(co_return                   , KEYCOROUTINES)
-KEYWORD(co_yield                    , KEYCOROUTINES)
-
 // GNU Extensions (in impl-reserved namespace)
 KEYWORD(_Decimal32                  , KEYALL)
 KEYWORD(_Decimal64                  , KEYALL)
@@ -384,7 +387,6 @@ KEYWORD(__real                      , KEYALL)
 KEYWORD(__thread                    , KEYALL)
 KEYWORD(__FUNCTION__                , KEYALL)
 KEYWORD(__PRETTY_FUNCTION__         , KEYALL)
-KEYWORD(__auto_type                 , KEYALL)
 
 // GNU Extensions (outside impl-reserved namespace)
 KEYWORD(typeof                      , KEYGNU)
@@ -477,11 +479,8 @@ KEYWORD(__array_extent              , KEYCXX)
 KEYWORD(__private_extern__          , KEYALL)
 KEYWORD(__module_private__          , KEYALL)
 
-// Extension that will be enabled for Microsoft, Borland and PS4, but can be
-// disabled via '-fno-declspec'.
-KEYWORD(__declspec                  , 0)
-
 // Microsoft Extension.
+KEYWORD(__declspec                  , KEYMS|KEYBORLAND)
 KEYWORD(__cdecl                     , KEYALL)
 KEYWORD(__stdcall                   , KEYALL)
 KEYWORD(__fastcall                  , KEYALL)

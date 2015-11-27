@@ -263,7 +263,25 @@ namespace clang {
       Diags.DecrementAllExtensionsSilenced();
     }
   };
-  
+
+//@@
+  /// SuppressDiagnosticsRAIIObject - Suppresses all diagnostics
+  /// and restores them when destroyed.
+  class SuppressDiagnosticsRAIIObject {
+    SuppressDiagnosticsRAIIObject(const SuppressDiagnosticsRAIIObject &) = delete;
+    void operator=(const SuppressDiagnosticsRAIIObject &) = delete;
+
+    DiagnosticsEngine &Diags;
+	bool OldSuppress;
+  public:
+    SuppressDiagnosticsRAIIObject(DiagnosticsEngine &diags) :
+		Diags(diags), OldSuppress(diags.getSuppressAllDiagnostics()) {
+		Diags.setSuppressAllDiagnostics(true);
+	}
+    ~SuppressDiagnosticsRAIIObject() { Diags.setSuppressAllDiagnostics(OldSuppress); }
+  };
+//@@
+
   /// ColonProtectionRAIIObject - This sets the Parser::ColonIsSacred bool and
   /// restores it when destroyed.  This says that "foo:" should not be
   /// considered a possible typo for "foo::" for error recovery purposes.

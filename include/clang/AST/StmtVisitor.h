@@ -81,6 +81,10 @@ public:
       }
     } else if (PTR(UnaryOperator) UnOp = dyn_cast<UnaryOperator>(S)) {
       switch (UnOp->getOpcode()) {
+//@@
+      case UO_Escape:	 DISPATCH(UnaryEscape,   UnaryOperator);
+      case UO_Inline:    DISPATCH(UnaryInline,   UnaryOperator);
+//@@
       case UO_PostInc:   DISPATCH(UnaryPostInc,   UnaryOperator);
       case UO_PostDec:   DISPATCH(UnaryPostDec,   UnaryOperator);
       case UO_PreInc:    DISPATCH(UnaryPreInc,    UnaryOperator);
@@ -94,7 +98,6 @@ public:
       case UO_Real:      DISPATCH(UnaryReal,      UnaryOperator);
       case UO_Imag:      DISPATCH(UnaryImag,      UnaryOperator);
       case UO_Extension: DISPATCH(UnaryExtension, UnaryOperator);
-      case UO_Coawait:   DISPATCH(UnaryCoawait,   UnaryOperator);
       }
     }
 
@@ -152,6 +155,9 @@ public:
   RetTy VisitUnary ## NAME(PTR(UnaryOperator) S) { \
     DISPATCH(UnaryOperator, UnaryOperator);    \
   }
+//@@
+  UNARYOP_FALLBACK(Escape)   UNARYOP_FALLBACK(Inline)
+//@@
   UNARYOP_FALLBACK(PostInc)   UNARYOP_FALLBACK(PostDec)
   UNARYOP_FALLBACK(PreInc)    UNARYOP_FALLBACK(PreDec)
   UNARYOP_FALLBACK(AddrOf)    UNARYOP_FALLBACK(Deref)
@@ -159,7 +165,7 @@ public:
   UNARYOP_FALLBACK(Plus)      UNARYOP_FALLBACK(Minus)
   UNARYOP_FALLBACK(Not)       UNARYOP_FALLBACK(LNot)
   UNARYOP_FALLBACK(Real)      UNARYOP_FALLBACK(Imag)
-  UNARYOP_FALLBACK(Extension) UNARYOP_FALLBACK(Coawait)
+  UNARYOP_FALLBACK(Extension)
 #undef UNARYOP_FALLBACK
 
   // Base case, ignore it. :)

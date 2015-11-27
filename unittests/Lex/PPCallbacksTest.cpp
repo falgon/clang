@@ -110,16 +110,15 @@ public:
 class PPCallbacksTest : public ::testing::Test {
 protected:
   PPCallbacksTest()
-      : InMemoryFileSystem(new vfs::InMemoryFileSystem),
-        FileMgr(FileSystemOptions(), InMemoryFileSystem),
-        DiagID(new DiagnosticIDs()), DiagOpts(new DiagnosticOptions()),
+      : FileMgr(FileMgrOpts), DiagID(new DiagnosticIDs()),
+        DiagOpts(new DiagnosticOptions()),
         Diags(DiagID, DiagOpts.get(), new IgnoringDiagConsumer()),
         SourceMgr(Diags, FileMgr), TargetOpts(new TargetOptions()) {
     TargetOpts->Triple = "x86_64-apple-darwin11.1.0";
     Target = TargetInfo::CreateTargetInfo(Diags, TargetOpts);
   }
 
-  IntrusiveRefCntPtr<vfs::InMemoryFileSystem> InMemoryFileSystem;
+  FileSystemOptions FileMgrOpts;
   FileManager FileMgr;
   IntrusiveRefCntPtr<DiagnosticIDs> DiagID;
   IntrusiveRefCntPtr<DiagnosticOptions> DiagOpts;
@@ -134,8 +133,7 @@ protected:
   void AddFakeHeader(HeaderSearch& HeaderInfo, const char* HeaderPath, 
     bool IsSystemHeader) {
       // Tell FileMgr about header.
-      InMemoryFileSystem->addFile(HeaderPath, 0,
-                                  llvm::MemoryBuffer::getMemBuffer("\n"));
+      FileMgr.getVirtualFile(HeaderPath, 0, 0);
 
       // Add header's parent path to search path.
       StringRef SearchPath = llvm::sys::path::parent_path(HeaderPath);

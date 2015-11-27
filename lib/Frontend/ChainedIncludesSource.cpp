@@ -82,7 +82,6 @@ createASTReader(CompilerInstance &CI, StringRef pchFile,
   std::unique_ptr<ASTReader> Reader;
   Reader.reset(new ASTReader(PP, CI.getASTContext(),
                              CI.getPCHContainerReader(),
-                             /*Extensions=*/{ },
                              /*isysroot=*/"", /*DisableValidation=*/true));
   for (unsigned ti = 0; ti < bufNames.size(); ++ti) {
     StringRef sr(bufNames[ti]);
@@ -161,10 +160,8 @@ IntrusiveRefCntPtr<ExternalSemaSource> clang::createChainedIncludesSource(
     Clang->createASTContext();
 
     auto Buffer = std::make_shared<PCHBuffer>();
-    ArrayRef<llvm::IntrusiveRefCntPtr<ModuleFileExtension>> Extensions;
     auto consumer = llvm::make_unique<PCHGenerator>(
-        Clang->getPreprocessor(), "-", nullptr, /*isysroot=*/"", Buffer,
-        Extensions);
+        Clang->getPreprocessor(), "-", nullptr, /*isysroot=*/"", Buffer);
     Clang->getASTContext().setASTMutationListener(
                                             consumer->GetASTMutationListener());
     Clang->setASTConsumer(std::move(consumer));

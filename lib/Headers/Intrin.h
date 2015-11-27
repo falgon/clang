@@ -289,6 +289,9 @@ void _xend(void);
 static __inline__
 #define _XCR_XFEATURE_ENABLED_MASK 0
 unsigned __int64 __cdecl _xgetbv(unsigned int);
+void __cdecl _xrstor(void const *, unsigned __int64);
+void __cdecl _xsave(void *, unsigned __int64);
+void __cdecl _xsaveopt(void *, unsigned __int64);
 void __cdecl _xsetbv(unsigned int, unsigned __int64);
 
 /* These additional intrinsics are turned on in x64/amd64/x86_64 mode. */
@@ -428,20 +431,12 @@ __umulh(unsigned __int64 _Multiplier, unsigned __int64 _Multiplicand) {
       (unsigned __int128)_Multiplier * (unsigned __int128)_Multiplicand;
   return _FullProduct >> 64;
 }
+void __cdecl _xrstor64(void const *, unsigned __int64);
+void __cdecl _xsave64(void *, unsigned __int64);
+void __cdecl _xsaveopt64(void *, unsigned __int64);
 
 #endif /* __x86_64__ */
 
-/*----------------------------------------------------------------------------*\
-|* Multiplication
-\*----------------------------------------------------------------------------*/
-static __inline__ __int64 __DEFAULT_FN_ATTRS
-__emul(int __in1, int __in2) {
-  return (__int64)__in1 * (__int64)__in2;
-}
-static __inline__ unsigned __int64 __DEFAULT_FN_ATTRS
-__emulu(unsigned int __in1, unsigned int __in2) {
-  return (unsigned __int64)__in1 * (unsigned __int64)__in2;
-}
 /*----------------------------------------------------------------------------*\
 |* Bit Twiddling
 \*----------------------------------------------------------------------------*/
@@ -851,7 +846,7 @@ __movsd(unsigned long *__dst, unsigned long const *__src, size_t __n) {
 }
 static __inline__ void __DEFAULT_FN_ATTRS
 __movsw(unsigned short *__dst, unsigned short const *__src, size_t __n) {
-  __asm__("rep movsw" : : "D"(__dst), "S"(__src), "c"(__n)
+  __asm__("rep movsh" : : "D"(__dst), "S"(__src), "c"(__n)
                         : "%edi", "%esi", "%ecx");
 }
 static __inline__ void __DEFAULT_FN_ATTRS
@@ -866,7 +861,7 @@ __stosd(unsigned long *__dst, unsigned long __x, size_t __n) {
 }
 static __inline__ void __DEFAULT_FN_ATTRS
 __stosw(unsigned short *__dst, unsigned short __x, size_t __n) {
-  __asm__("rep stosw" : : "D"(__dst), "a"(__x), "c"(__n)
+  __asm__("rep stosh" : : "D"(__dst), "a"(__x), "c"(__n)
                         : "%edi", "%ecx");
 }
 #endif

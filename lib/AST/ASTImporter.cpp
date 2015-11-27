@@ -183,6 +183,9 @@ namespace clang {
     Stmt *VisitAttributedStmt(AttributedStmt *S);
     Stmt *VisitIfStmt(IfStmt *S);
     Stmt *VisitSwitchStmt(SwitchStmt *S);
+	//@@
+	Stmt *VisitExecuteStmt(ExecuteStmt *S);
+	//@@
     Stmt *VisitWhileStmt(WhileStmt *S);
     Stmt *VisitDoStmt(DoStmt *S);
     Stmt *VisitForStmt(ForStmt *S);
@@ -217,6 +220,9 @@ namespace clang {
     Expr *VisitCharacterLiteral(CharacterLiteral *E);
     Expr *VisitParenExpr(ParenExpr *E);
     Expr *VisitUnaryOperator(UnaryOperator *E);
+//@@
+	Expr *VisitQuasiQuoteExpr(QuasiQuoteExpr *E);
+//@@
     Expr *VisitUnaryExprOrTypeTraitExpr(UnaryExprOrTypeTraitExpr *E);
     Expr *VisitBinaryOperator(BinaryOperator *E);
     Expr *VisitCompoundAssignOperator(CompoundAssignOperator *E);
@@ -1746,7 +1752,7 @@ QualType ASTNodeImporter::VisitAutoType(const AutoType *T) {
       return QualType();
   }
   
-  return Importer.getToContext().getAutoType(ToDeduced, T->getKeyword(),
+  return Importer.getToContext().getAutoType(ToDeduced, T->isDecltypeAuto(), 
                                              /*IsDependent*/false);
 }
 
@@ -4745,6 +4751,18 @@ Stmt *ASTNodeImporter::VisitSwitchStmt(SwitchStmt *S) {
   return ToStmt;
 }
 
+//@@
+Stmt *ASTNodeImporter::VisitExecuteStmt(ExecuteStmt *S) {
+	Stmt *ToStmt = Importer.Import(S->getStmt());
+	if (!ToStmt && S->getStmt())
+		return nullptr;
+	SourceLocation ToStartLoc = Importer.Import(S->getStartLoc());
+	SourceLocation ToEndLoc = Importer.Import(S->getEndLoc());
+	return new (Importer.getToContext()) ExecuteStmt(Importer.getToContext(),
+				ToStmt, ToStartLoc, ToEndLoc);
+}
+//@@
+
 Stmt *ASTNodeImporter::VisitWhileStmt(WhileStmt *S) {
   VarDecl *ToConditionVariable = nullptr;
   if (VarDecl *FromConditionVariable = S->getConditionVariable()) {
@@ -4915,14 +4933,13 @@ Stmt *ASTNodeImporter::VisitCXXForRangeStmt(CXXForRangeStmt *S) {
   if (!ToBody && S->getBody())
     return nullptr;
   SourceLocation ToForLoc = Importer.Import(S->getForLoc());
-  SourceLocation ToCoawaitLoc = Importer.Import(S->getCoawaitLoc());
   SourceLocation ToColonLoc = Importer.Import(S->getColonLoc());
   SourceLocation ToRParenLoc = Importer.Import(S->getRParenLoc());
   return new (Importer.getToContext()) CXXForRangeStmt(ToRange, ToBeginEnd,
                                                        ToCond, ToInc,
                                                        ToLoopVar, ToBody,
-                                                       ToForLoc, ToCoawaitLoc,
-                                                       ToColonLoc, ToRParenLoc);
+                                                       ToForLoc, ToColonLoc,
+                                                       ToRParenLoc);
 }
 
 Stmt *ASTNodeImporter::VisitObjCForCollectionStmt(ObjCForCollectionStmt *S) {
@@ -5109,6 +5126,23 @@ Expr *ASTNodeImporter::VisitUnaryOperator(UnaryOperator *E) {
                                                      E->getObjectKind(),
                                          Importer.Import(E->getOperatorLoc()));                                        
 }
+
+//@@
+Expr *ASTNodeImporter::VisitQuasiQuoteExpr(QuasiQuoteExpr *E) {
+  QualType T = Importer.Import(E->getType());
+  if (T.isNull())
+    return nullptr;
+  //@@TODO: properly import quoted elements
+  QuotedElements *Elems = nullptr;	//Importer.Import(E->getElements());
+  if (!Elems)
+    return nullptr;
+
+  return new (Importer.getToContext()) QuasiQuoteExpr(
+                                            Elems, T,
+			                                Importer.Import(E->getStartLoc()),
+                                            Importer.Import(E->getEndLoc()));
+}
+//@@
 
 Expr *ASTNodeImporter::VisitUnaryExprOrTypeTraitExpr(
                                             UnaryExprOrTypeTraitExpr *E) {
@@ -5330,7 +5364,7 @@ Expr *ASTNodeImporter::VisitCallExpr(CallExpr *E) {
 
   return new (Importer.getToContext())
     CallExpr(Importer.getToContext(), ToCallee, 
-             llvm::makeArrayRef(ToArgs_Copied, NumArgs), T, E->getValueKind(),
+             ArrayRef<Expr*>(ToArgs_Copied, NumArgs), T, E->getValueKind(),
              Importer.Import(E->getRParenLoc()));
 }
 

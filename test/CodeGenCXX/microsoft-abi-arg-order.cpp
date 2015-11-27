@@ -42,19 +42,18 @@ void call_foo() {
 // X86: call i8* @llvm.stacksave()
 // X86: %[[argmem:[^ ]*]] = alloca inalloca [[argmem_ty]]
 // X86: %[[arg3:[^ ]*]] = getelementptr inbounds [[argmem_ty]], [[argmem_ty]]* %[[argmem]], i32 0, i32 2
-// X86: call x86_thiscallcc %struct.A* @"\01??0A@@QAE@H@Z"(%struct.A* %[[arg3]], i32 3)
+// X86: invoke x86_thiscallcc %struct.A* @"\01??0A@@QAE@H@Z"(%struct.A* %[[arg3]], i32 3)
 // X86: %[[arg2:[^ ]*]] = getelementptr inbounds [[argmem_ty]], [[argmem_ty]]* %[[argmem]], i32 0, i32 1
 // X86: invoke x86_thiscallcc %struct.A* @"\01??0A@@QAE@H@Z"(%struct.A* %[[arg2]], i32 2)
 // X86: %[[arg1:[^ ]*]] = getelementptr inbounds [[argmem_ty]], [[argmem_ty]]* %[[argmem]], i32 0, i32 0
 // X86: invoke x86_thiscallcc %struct.A* @"\01??0A@@QAE@H@Z"(%struct.A* %[[arg1]], i32 1)
-// X86: call void @"\01?foo@@YAXUA@@00@Z"([[argmem_ty]]* inalloca %[[argmem]])
+// X86: invoke void @"\01?foo@@YAXUA@@00@Z"([[argmem_ty]]* inalloca %[[argmem]])
 // X86: call void @llvm.stackrestore
 // X86: ret void
 //
 //   lpad2:
-// X86: cleanuppad []
 // X86: call x86_thiscallcc void @"\01??1A@@QAE@XZ"(%struct.A* %[[arg2]])
-// X86: cleanupret
+// X86: br label
 //
 //   ehcleanup:
 // X86: call x86_thiscallcc void @"\01??1A@@QAE@XZ"(%struct.A* %[[arg3]])
@@ -68,9 +67,8 @@ void call_foo() {
 // X64: ret void
 //
 //   lpad2:
-// X64: cleanuppad []
 // X64: call void @"\01??1A@@QEAA@XZ"(%struct.A* %[[arg2]])
-// X64: cleanupret
+// X64: br label
 //
 //   ehcleanup:
 // X64: call void @"\01??1A@@QEAA@XZ"(%struct.A* %[[arg3]])

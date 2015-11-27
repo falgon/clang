@@ -109,15 +109,16 @@ __device__ int read_lanemasks() {
 
 }
 
-__device__ long long read_clocks() {
+__device__ long read_clocks() {
 
 // CHECK: call i32 @llvm.ptx.read.clock()
 // CHECK: call i64 @llvm.ptx.read.clock64()
 
   int a = __builtin_ptx_read_clock();
-  long long b = __builtin_ptx_read_clock64();
+  long b = __builtin_ptx_read_clock64();
 
-  return a + b;
+  return (long)a + b;
+
 }
 
 __device__ int read_pms() {
@@ -260,13 +261,10 @@ __device__ void nvvm_atom(float *fp, float f, int *ip, int i, long *lp, long l,
   __nvvm_atom_min_gen_ull((unsigned long long *)&sll, ll);
 
   // CHECK: cmpxchg
-  // CHECK-NEXT: extractvalue { i32, i1 } {{%[0-9]+}}, 0
   __nvvm_atom_cas_gen_i(ip, 0, i);
   // CHECK: cmpxchg
-  // CHECK-NEXT: extractvalue { {{i32|i64}}, i1 } {{%[0-9]+}}, 0
   __nvvm_atom_cas_gen_l(&dl, 0, l);
   // CHECK: cmpxchg
-  // CHECK-NEXT: extractvalue { i64, i1 } {{%[0-9]+}}, 0
   __nvvm_atom_cas_gen_ll(&sll, 0, ll);
 
   // CHECK: call float @llvm.nvvm.atomic.load.add.f32.p0f32

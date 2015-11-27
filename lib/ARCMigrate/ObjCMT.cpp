@@ -214,15 +214,25 @@ namespace {
   // FIXME. This duplicates one in RewriteObjCFoundationAPI.cpp
   bool subscriptOperatorNeedsParens(const Expr *FullExpr) {
     const Expr* Expr = FullExpr->IgnoreImpCasts();
-    return !(isa<ArraySubscriptExpr>(Expr) || isa<CallExpr>(Expr) ||
-             isa<DeclRefExpr>(Expr) || isa<CXXNamedCastExpr>(Expr) ||
-             isa<CXXConstructExpr>(Expr) || isa<CXXThisExpr>(Expr) ||
-             isa<CXXTypeidExpr>(Expr) ||
-             isa<CXXUnresolvedConstructExpr>(Expr) ||
-             isa<ObjCMessageExpr>(Expr) || isa<ObjCPropertyRefExpr>(Expr) ||
-             isa<ObjCProtocolExpr>(Expr) || isa<MemberExpr>(Expr) ||
-             isa<ObjCIvarRefExpr>(Expr) || isa<ParenExpr>(FullExpr) ||
-             isa<ParenListExpr>(Expr) || isa<SizeOfPackExpr>(Expr));
+    if (isa<ArraySubscriptExpr>(Expr) ||
+        isa<CallExpr>(Expr) ||
+        isa<DeclRefExpr>(Expr) ||
+        isa<CXXNamedCastExpr>(Expr) ||
+        isa<CXXConstructExpr>(Expr) ||
+        isa<CXXThisExpr>(Expr) ||
+        isa<CXXTypeidExpr>(Expr) ||
+        isa<CXXUnresolvedConstructExpr>(Expr) ||
+        isa<ObjCMessageExpr>(Expr) ||
+        isa<ObjCPropertyRefExpr>(Expr) ||
+        isa<ObjCProtocolExpr>(Expr) ||
+        isa<MemberExpr>(Expr) ||
+        isa<ObjCIvarRefExpr>(Expr) ||
+        isa<ParenExpr>(FullExpr) ||
+        isa<ParenListExpr>(Expr) ||
+        isa<SizeOfPackExpr>(Expr))
+      return false;
+    
+    return true;
   }
   
   /// \brief - Rewrite message expression for Objective-C setter and getters into
@@ -655,7 +665,9 @@ ClassImplementsAllMethodsAndProperties(ASTContext &Ctx,
         return false;
     }
   }
-  return HasAtleastOneRequiredProperty || HasAtleastOneRequiredMethod;
+  if (HasAtleastOneRequiredProperty || HasAtleastOneRequiredMethod)
+    return true;
+  return false;
 }
 
 static bool rewriteToObjCInterfaceDecl(const ObjCInterfaceDecl *IDecl,
@@ -724,7 +736,7 @@ static bool rewriteToNSEnumDecl(const EnumDecl *EnumDcl,
   SourceLocation EndOfEnumDclLoc = EnumDcl->getLocEnd();
   EndOfEnumDclLoc = trans::findSemiAfterLocation(EndOfEnumDclLoc,
                                                  NS.getASTContext(), /*IsDecl*/true);
-  if (EndOfEnumDclLoc.isValid()) {
+  if (!EndOfEnumDclLoc.isInvalid()) {
     SourceRange EnumDclRange(EnumDcl->getLocStart(), EndOfEnumDclLoc);
     commit.insertFromRange(TypedefDcl->getLocStart(), EnumDclRange);
   }
@@ -734,7 +746,7 @@ static bool rewriteToNSEnumDecl(const EnumDecl *EnumDcl,
   SourceLocation EndTypedefDclLoc = TypedefDcl->getLocEnd();
   EndTypedefDclLoc = trans::findSemiAfterLocation(EndTypedefDclLoc,
                                                  NS.getASTContext(), /*IsDecl*/true);
-  if (EndTypedefDclLoc.isValid()) {
+  if (!EndTypedefDclLoc.isInvalid()) {
     SourceRange TDRange(TypedefDcl->getLocStart(), EndTypedefDclLoc);
     commit.remove(TDRange);
   }
@@ -743,7 +755,7 @@ static bool rewriteToNSEnumDecl(const EnumDecl *EnumDcl,
 
   EndOfEnumDclLoc = trans::findLocationAfterSemi(EnumDcl->getLocEnd(), NS.getASTContext(),
                                                  /*IsDecl*/true);
-  if (EndOfEnumDclLoc.isValid()) {
+  if (!EndOfEnumDclLoc.isInvalid()) {
     SourceLocation BeginOfEnumDclLoc = EnumDcl->getLocStart();
     // FIXME. This assumes that enum decl; is immediately preceded by eoln.
     // It is trying to remove the enum decl. lines entirely.
@@ -1793,7 +1805,7 @@ private:
       FileID FID;
       unsigned Offset;
       std::tie(FID, Offset) = SourceMgr.getDecomposedLoc(Loc);
-      assert(FID.isValid());
+      assert(!FID.isInvalid());
       SmallString<200> Path =
           StringRef(SourceMgr.getFileEntryForID(FID)->getName());
       llvm::sys::fs::make_absolute(Path);
@@ -1850,8 +1862,8 @@ void ObjCMigrateASTConsumer::HandleTranslationUnit(ASTContext &Ctx) {
     for (DeclContext::decl_iterator D = TU->decls_begin(), DEnd = TU->decls_end();
          D != DEnd; ++D) {
       FileID FID = PP.getSourceManager().getFileID((*D)->getLocation());
-      if (FID.isValid())
-        if (FileId.isValid() && FileId != FID) {
+      if (!FID.isInvalid())
+        if (!FileId.isInvalid() && FileId != FID) {
           if (ASTMigrateActions & FrontendOptions::ObjCMT_Annotation)
             AnnotateImplicitBridging(Ctx);
         }
@@ -2206,7 +2218,7 @@ static std::string applyEditsToTemp(const FileEntry *FE,
   SmallString<64> TempPath;
   int FD;
   if (fs::createTemporaryFile(path::filename(FE->getName()),
-                              path::extension(FE->getName()).drop_front(), FD,
+                              path::extension(FE->getName()), FD,
                               TempPath)) {
     reportDiag("Could not create file: " + TempPath.str(), Diag);
     return std::string();

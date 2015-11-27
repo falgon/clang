@@ -63,6 +63,10 @@ namespace  {
       IndentLevel -= SubIndent;
     }
 
+//@@
+	void PrintRawQuotedElements(QuotedElements *E);
+//@@
+
     void PrintRawCompoundStmt(CompoundStmt *S);
     void PrintRawDecl(Decl *D);
     void PrintRawDeclStmt(const DeclStmt *S);
@@ -111,6 +115,43 @@ namespace  {
 //  Stmt printing methods.
 //===----------------------------------------------------------------------===//
 
+//@@
+void StmtPrinter::PrintRawQuotedElements(QuotedElements *Elems) {
+	switch(Elems->getType()) {
+		case QuotedElements::AST_Expression: {
+			PrintExpr(Elems->getExpr());
+			break;
+		}
+		case QuotedElements::AST_StatementOrDeclarationList: {
+			Stmt **S = Elems->getStmts();
+			for (unsigned i = 0; S[i]; ++i)
+				PrintStmt(S[i], 0);
+			break;
+		}
+		case QuotedElements::AST_ParameterDeclaration: {
+			QuotedElements::ParamVector* V = Elems->getParams();
+			for (unsigned i = 0; i < V->size(); ++i) {
+				if (i) OS << ", ";
+				(*V)[i].Param->print(OS, Policy, IndentLevel);
+			}
+			break;
+		}
+		case QuotedElements::AST_DeclContext: {
+			Elems->getDeclContext()->printDeclContext(OS, Policy, IndentLevel);
+			break;
+		}
+		case QuotedElements::AST_TypeInfo: {
+			TypeSourceInfo *TInfo = Elems->getTypeInfo();
+			//PrintingPolicy P(Policy);
+			//P.SuppressTagKeyword = true;
+			TInfo->getType().print(OS, Policy);
+			break;
+		}
+		default: break;
+	}
+}
+//@@
+
 /// PrintRawCompoundStmt - Print a compound stmt without indenting the {, and
 /// with no newline after the }.
 void StmtPrinter::PrintRawCompoundStmt(CompoundStmt *Node) {
@@ -137,7 +178,12 @@ void StmtPrinter::VisitNullStmt(NullStmt *Node) {
 void StmtPrinter::VisitDeclStmt(DeclStmt *Node) {
   Indent();
   PrintRawDeclStmt(Node);
-  OS << ";\n";
+//@@
+  if (Node->isSingleDecl() && Node->getSingleDecl()->needsTrailingSemi())
+    OS << ";";
+  OS << "\n";
+//@@was: OS << ";\n";
+//@@
 }
 
 void StmtPrinter::VisitCompoundStmt(CompoundStmt *Node) {
@@ -234,6 +280,13 @@ void StmtPrinter::VisitSwitchStmt(SwitchStmt *Node) {
     PrintStmt(Node->getBody());
   }
 }
+
+//@@
+void StmtPrinter::VisitExecuteStmt(ExecuteStmt *Node) {
+  Indent() << ".&";
+  PrintStmt(Node->getStmt(), -IndentLevel);
+}
+//@@
 
 void StmtPrinter::VisitWhileStmt(WhileStmt *Node) {
   Indent() << "while (";
@@ -529,10 +582,19 @@ void StmtPrinter::VisitCXXCatchStmt(CXXCatchStmt *Node) {
 void StmtPrinter::VisitCXXTryStmt(CXXTryStmt *Node) {
   Indent() << "try ";
   PrintRawCompoundStmt(Node->getTryBlock());
-  for (unsigned i = 0, e = Node->getNumHandlers(); i < e; ++i) {
-    OS << " ";
-    PrintRawCXXCatchStmt(Node->getHandler(i));
+//@@
+  for (Stmt* child : Node->children()) {
+    if (child != Node->getTryBlock()) {
+      OS << " ";
+      PrintStmt(child);
+	}
   }
+//@@was:
+  //for (unsigned i = 0, e = Node->getNumHandlers(); i < e; ++i) {
+  //  OS << " ";
+  //  PrintRawCXXCatchStmt(Node->getHandler(i));
+  //}
+//@@
   OS << "\n";
 }
 
@@ -602,8 +664,6 @@ public:
 
 void OMPClausePrinter::VisitOMPIfClause(OMPIfClause *Node) {
   OS << "if(";
-  if (Node->getNameModifier() != OMPD_unknown)
-    OS << getOpenMPDirectiveName(Node->getNameModifier()) << ": ";
   Node->getCondition()->printPretty(OS, nullptr, Policy, 0);
   OS << ")";
 }
@@ -697,21 +757,9 @@ void OMPClausePrinter::VisitOMPSeqCstClause(OMPSeqCstClause *) {
   OS << "seq_cst";
 }
 
-void OMPClausePrinter::VisitOMPThreadsClause(OMPThreadsClause *) {
-  OS << "threads";
-}
-
-void OMPClausePrinter::VisitOMPSIMDClause(OMPSIMDClause *) { OS << "simd"; }
-
 void OMPClausePrinter::VisitOMPDeviceClause(OMPDeviceClause *Node) {
   OS << "device(";
   Node->getDevice()->printPretty(OS, nullptr, Policy, 0);
-  OS << ")";
-}
-
-void OMPClausePrinter::VisitOMPNumTeamsClause(OMPNumTeamsClause *Node) {
-  OS << "num_teams(";
-  Node->getNumTeams()->printPretty(OS, nullptr, Policy, 0);
   OS << ")";
 }
 
@@ -848,23 +896,6 @@ void OMPClausePrinter::VisitOMPDependClause(OMPDependClause *Node) {
     OS << ")";
   }
 }
-
-void OMPClausePrinter::VisitOMPMapClause(OMPMapClause *Node) {
-  if (!Node->varlist_empty()) {
-    OS << "map(";
-    if (Node->getMapType() != OMPC_MAP_unknown) {
-      if (Node->getMapTypeModifier() != OMPC_MAP_unknown) {
-        OS << getOpenMPSimpleClauseTypeName(OMPC_map, 
-                                            Node->getMapTypeModifier());
-        OS << ',';
-      }
-      OS << getOpenMPSimpleClauseTypeName(OMPC_map, Node->getMapType());
-      OS << ':';
-    }
-    VisitOMPClauseList(Node, ' ');
-    OS << ")";
-  }
-}
 }
 
 //===----------------------------------------------------------------------===//
@@ -987,7 +1018,7 @@ void StmtPrinter::VisitOMPFlushDirective(OMPFlushDirective *Node) {
 }
 
 void StmtPrinter::VisitOMPOrderedDirective(OMPOrderedDirective *Node) {
-  Indent() << "#pragma omp ordered ";
+  Indent() << "#pragma omp ordered";
   PrintOMPExecutableDirective(Node);
 }
 
@@ -1020,7 +1051,7 @@ void StmtPrinter::VisitOMPCancellationPointDirective(
 
 void StmtPrinter::VisitOMPCancelDirective(OMPCancelDirective *Node) {
   Indent() << "#pragma omp cancel "
-           << getOpenMPDirectiveName(Node->getCancelRegion()) << " ";
+           << getOpenMPDirectiveName(Node->getCancelRegion());
   PrintOMPExecutableDirective(Node);
 }
 //===----------------------------------------------------------------------===//
@@ -1237,6 +1268,14 @@ void StmtPrinter::VisitUnaryOperator(UnaryOperator *Node) {
     OS << UnaryOperator::getOpcodeStr(Node->getOpcode());
 }
 
+//@@
+void StmtPrinter::VisitQuasiQuoteExpr(QuasiQuoteExpr *Node) {
+	OS << ".< ";
+	PrintRawQuotedElements(Node->getElements());
+	OS << " >.";
+}
+//@@
+
 void StmtPrinter::VisitOffsetOfExpr(OffsetOfExpr *Node) {
   OS << "__builtin_offsetof(";
   Node->getTypeSourceInfo()->getType().print(OS, Policy);
@@ -1329,11 +1368,9 @@ void StmtPrinter::VisitOMPArraySectionExpr(OMPArraySectionExpr *Node) {
   OS << "[";
   if (Node->getLowerBound())
     PrintExpr(Node->getLowerBound());
-  if (Node->getColonLoc().isValid()) {
-    OS << ":";
-    if (Node->getLength())
-      PrintExpr(Node->getLength());
-  }
+  OS << ":";
+  if (Node->getLength())
+    PrintExpr(Node->getLength());
   OS << "]";
 }
 
@@ -1738,13 +1775,6 @@ void StmtPrinter::VisitMSPropertyRefExpr(MSPropertyRefExpr *Node) {
   OS << Node->getPropertyDecl()->getDeclName();
 }
 
-void StmtPrinter::VisitMSPropertySubscriptExpr(MSPropertySubscriptExpr *Node) {
-  PrintExpr(Node->getBase());
-  OS << "[";
-  PrintExpr(Node->getIdx());
-  OS << "]";
-}
-
 void StmtPrinter::VisitUserDefinedLiteral(UserDefinedLiteral *Node) {
   switch (Node->getLiteralOperatorKind()) {
   case UserDefinedLiteral::LOK_Raw:
@@ -1757,7 +1787,7 @@ void StmtPrinter::VisitUserDefinedLiteral(UserDefinedLiteral *Node) {
     assert(Args);
 
     if (Args->size() != 1) {
-      OS << "operator\"\"" << Node->getUDSuffix()->getName();
+      OS << "operator \"\" " << Node->getUDSuffix()->getName();
       TemplateSpecializationType::PrintTemplateArgumentList(
           OS, Args->data(), Args->size(), Policy);
       OS << "()";
@@ -2193,31 +2223,6 @@ void StmtPrinter::VisitCXXFoldExpr(CXXFoldExpr *E) {
   OS << ")";
 }
 
-// C++ Coroutines TS
-
-void StmtPrinter::VisitCoroutineBodyStmt(CoroutineBodyStmt *S) {
-  Visit(S->getBody());
-}
-
-void StmtPrinter::VisitCoreturnStmt(CoreturnStmt *S) {
-  OS << "co_return";
-  if (S->getOperand()) {
-    OS << " ";
-    Visit(S->getOperand());
-  }
-  OS << ";";
-}
-
-void StmtPrinter::VisitCoawaitExpr(CoawaitExpr *S) {
-  OS << "co_await ";
-  PrintExpr(S->getOperand());
-}
-
-void StmtPrinter::VisitCoyieldExpr(CoyieldExpr *S) {
-  OS << "co_yield ";
-  PrintExpr(S->getOperand());
-}
-
 // Obj-C
 
 void StmtPrinter::VisitObjCStringLiteral(ObjCStringLiteral *Node) {
@@ -2386,6 +2391,14 @@ void Stmt::printPretty(raw_ostream &OS,
                        unsigned Indentation) const {
   StmtPrinter P(OS, Helper, Policy, Indentation);
   P.Visit(const_cast<Stmt*>(this));
+}
+
+void QuotedElements::printPretty(raw_ostream &OS,
+								 PrinterHelper *Helper,
+								 const PrintingPolicy &Policy,
+								 unsigned Indentation) const {
+  StmtPrinter P(OS, Helper, Policy, Indentation);
+  P.PrintRawQuotedElements(const_cast<QuotedElements*>(this));
 }
 
 //===----------------------------------------------------------------------===//

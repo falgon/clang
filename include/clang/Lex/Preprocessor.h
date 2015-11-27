@@ -24,6 +24,7 @@
 #include "clang/Lex/ModuleMap.h"
 #include "clang/Lex/PPCallbacks.h"
 #include "clang/Lex/PTHLexer.h"
+#include "clang/Lex/PTHManager.h"
 #include "clang/Lex/TokenLexer.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
@@ -56,7 +57,6 @@ class CodeCompletionHandler;
 class DirectoryLookup;
 class PreprocessingRecord;
 class ModuleLoader;
-class PTHManager;
 class PreprocessorOptions;
 
 /// \brief Stores token information for comparing actual tokens with
@@ -98,7 +98,6 @@ class Preprocessor : public RefCountedBase<Preprocessor> {
   DiagnosticsEngine        *Diags;
   LangOptions       &LangOpts;
   const TargetInfo  *Target;
-  const TargetInfo  *AuxTarget;
   FileManager       &FileMgr;
   SourceManager     &SourceMgr;
   std::unique_ptr<ScratchBuffer> ScratchBuf;
@@ -657,10 +656,7 @@ public:
   ///
   /// \param Target is owned by the caller and must remain valid for the
   /// lifetime of the preprocessor.
-  /// \param AuxTarget is owned by the caller and must remain valid for
-  /// the lifetime of the preprocessor.
-  void Initialize(const TargetInfo &Target,
-                  const TargetInfo *AuxTarget = nullptr);
+  void Initialize(const TargetInfo &Target);
 
   /// \brief Initialize the preprocessor to parse a model file
   ///
@@ -682,7 +678,6 @@ public:
 
   const LangOptions &getLangOpts() const { return LangOpts; }
   const TargetInfo &getTargetInfo() const { return *Target; }
-  const TargetInfo *getAuxTargetInfo() const { return AuxTarget; }
   FileManager &getFileManager() const { return FileMgr; }
   SourceManager &getSourceManager() const { return SourceMgr; }
   HeaderSearch &getHeaderSearchInfo() const { return HeaderInfo; }
@@ -927,6 +922,13 @@ public:
   IdentifierInfo *getIdentifierInfo(StringRef Name) const {
     return &Identifiers.get(Name);
   }
+
+//@@
+  /// Return a new identifier info token.
+  IdentifierInfo *newIdentifierInfo(StringRef Name) const {
+    return Identifiers.makeNew(Name);
+  }
+//@@
 
   /// \brief Add the specified pragma handler to this preprocessor.
   ///
@@ -1184,6 +1186,15 @@ public:
     assert(CachedLexPos != 0);
     return CachedTokens[CachedLexPos-1].getLastLoc();
   }
+
+//@@
+  bool hasCachedTokens() const { return CachedLexPos != 0; }
+
+  Token getLastCachedToken() const {
+    assert(CachedLexPos != 0);
+    return CachedTokens[CachedLexPos-1];
+  }
+//@@
 
   /// \brief Replace the last token with an annotation token.
   ///

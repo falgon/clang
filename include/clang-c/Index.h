@@ -32,7 +32,7 @@
  * compatible, thus CINDEX_VERSION_MAJOR is expected to remain stable.
  */
 #define CINDEX_VERSION_MAJOR 0
-#define CINDEX_VERSION_MINOR 31
+#define CINDEX_VERSION_MINOR 30
 
 #define CINDEX_VERSION_ENCODE(major, minor) ( \
       ((major) * 10000)                       \
@@ -1289,17 +1289,6 @@ clang_parseTranslationUnit2(CXIndex CIdx,
                             CXTranslationUnit *out_TU);
 
 /**
- * \brief Same as clang_parseTranslationUnit2 but requires a full command line
- * for \c command_line_args including argv[0]. This is useful if the standard
- * library paths are relative to the binary.
- */
-CINDEX_LINKAGE enum CXErrorCode clang_parseTranslationUnit2FullArgv(
-    CXIndex CIdx, const char *source_filename,
-    const char *const *command_line_args, int num_command_line_args,
-    struct CXUnsavedFile *unsaved_files, unsigned num_unsaved_files,
-    unsigned options, CXTranslationUnit *out_TU);
-
-/**
  * \brief Flags that control how translation units are saved.
  *
  * The enumerators in this enumeration type are meant to be bitwise
@@ -1996,8 +1985,13 @@ enum CXCursorKind {
   /** \brief OpenMP 4.0 [2.4, Array Section].
    */
   CXCursor_OMPArraySectionExpr           = 147,
+//@@
+  /** \brief MetaC++ quasi-quotes.
+   */
+  CXCursor_QuasiQuoteExpr                = 148,
+//@@
 
-  CXCursor_LastExpr                      = CXCursor_OMPArraySectionExpr,
+  CXCursor_LastExpr                      = CXCursor_QuasiQuoteExpr, //@@ was: CXCursor_OMPArraySectionExpr,
 
   /* Statements */
   CXCursor_FirstStmt                     = 200,
@@ -2242,21 +2236,24 @@ enum CXCursorKind {
 
   /** \brief OpenMP taskgroup directive.
    */
-  CXCursor_OMPTaskgroupDirective         = 254,
+  CXCursor_OMPTaskgroupDirective          = 254,
 
   /** \brief OpenMP cancellation point directive.
    */
-  CXCursor_OMPCancellationPointDirective = 255,
+  CXCursor_OMPCancellationPointDirective  = 255,
 
   /** \brief OpenMP cancel directive.
    */
-  CXCursor_OMPCancelDirective            = 256,
-
+  CXCursor_OMPCancelDirective             = 256,
   /** \brief OpenMP target data directive.
    */
   CXCursor_OMPTargetDataDirective        = 257,
-
-  CXCursor_LastStmt                      = CXCursor_OMPTargetDataDirective,
+//@@
+  /** \brief A Execute statement.
+   */
+  CXCursor_ExecuteStmt                    = 258,
+//@@
+  CXCursor_LastStmt                    = CXCursor_ExecuteStmt, //@@ was: CXCursor_OMPTargetDataDirective,
 
   /**
    * \brief Cursor that represents the translation unit itself.
@@ -2290,8 +2287,7 @@ enum CXCursorKind {
   CXCursor_CUDAGlobalAttr                = 414,
   CXCursor_CUDAHostAttr                  = 415,
   CXCursor_CUDASharedAttr                = 416,
-  CXCursor_VisibilityAttr                = 417,
-  CXCursor_LastAttr                      = CXCursor_VisibilityAttr,
+  CXCursor_LastAttr                      = CXCursor_CUDASharedAttr,
 
   /* Preprocessing */
   CXCursor_PreprocessingDirective        = 500,
@@ -2307,9 +2303,8 @@ enum CXCursorKind {
    * \brief A module import declaration.
    */
   CXCursor_ModuleImportDecl              = 600,
-  CXCursor_TypeAliasTemplateDecl         = 601,
   CXCursor_FirstExtraDecl                = CXCursor_ModuleImportDecl,
-  CXCursor_LastExtraDecl                 = CXCursor_TypeAliasTemplateDecl,
+  CXCursor_LastExtraDecl                 = CXCursor_ModuleImportDecl,
 
   /**
    * \brief A code completion overload candidate.
@@ -2459,32 +2454,6 @@ enum CXLinkageKind {
  * \brief Determine the linkage of the entity referred to by a given cursor.
  */
 CINDEX_LINKAGE enum CXLinkageKind clang_getCursorLinkage(CXCursor cursor);
-
-enum CXVisibilityKind {
-  /** \brief This value indicates that no visibility information is available
-   * for a provided CXCursor. */
-  CXVisibility_Invalid,
-
-  /** \brief Symbol not seen by the linker. */
-  CXVisibility_Hidden,
-  /** \brief Symbol seen by the linker but resolves to a symbol inside this object. */
-  CXVisibility_Protected,
-  /** \brief Symbol seen by the linker and acts like a normal symbol. */
-  CXVisibility_Default
-};
-
-/**
- * \brief Describe the visibility of the entity referred to by a cursor.
- *
- * This returns the default visibility if not explicitly specified by
- * a visibility attribute. The default visibility may be changed by
- * commandline arguments.
- *
- * \param cursor The cursor to query.
- *
- * \returns The visibility of the cursor.
- */
-CINDEX_LINKAGE enum CXVisibilityKind clang_getCursorVisibility(CXCursor cursor);
 
 /**
  * \brief Determine the availability of the entity that this cursor refers to,
@@ -2898,8 +2867,7 @@ enum CXTypeKind {
   CXType_IncompleteArray = 114,
   CXType_VariableArray = 115,
   CXType_DependentSizedArray = 116,
-  CXType_MemberPointer = 117,
-  CXType_Auto = 118
+  CXType_MemberPointer = 117
 };
 
 /**
@@ -3902,12 +3870,6 @@ CINDEX_LINKAGE CXString clang_Cursor_getBriefCommentText(CXCursor C);
 CINDEX_LINKAGE CXString clang_Cursor_getMangling(CXCursor);
 
 /**
- * \brief Retrieve the CXStrings representing the mangled symbols of the C++
- * constructor or destructor at the cursor.
- */
-CINDEX_LINKAGE CXStringSet *clang_Cursor_getCXXManglings(CXCursor);
-
-/**
  * @}
  */
 
@@ -4000,11 +3962,6 @@ CXFile clang_Module_getTopLevelHeader(CXTranslationUnit,
  *
  * @{
  */
-
-/**
- * \brief Determine if a C++ field is declared 'mutable'.
- */
-CINDEX_LINKAGE unsigned clang_CXXField_isMutable(CXCursor C);
 
 /**
  * \brief Determine if a C++ member function or member function template is
@@ -5716,18 +5673,6 @@ CINDEX_LINKAGE int clang_indexSourceFile(CXIndexAction,
                                          unsigned num_unsaved_files,
                                          CXTranslationUnit *out_TU,
                                          unsigned TU_options);
-
-/**
- * \brief Same as clang_indexSourceFile but requires a full command line
- * for \c command_line_args including argv[0]. This is useful if the standard
- * library paths are relative to the binary.
- */
-CINDEX_LINKAGE int clang_indexSourceFileFullArgv(
-    CXIndexAction, CXClientData client_data, IndexerCallbacks *index_callbacks,
-    unsigned index_callbacks_size, unsigned index_options,
-    const char *source_filename, const char *const *command_line_args,
-    int num_command_line_args, struct CXUnsavedFile *unsaved_files,
-    unsigned num_unsaved_files, CXTranslationUnit *out_TU, unsigned TU_options);
 
 /**
  * \brief Index the given translation unit via callbacks implemented through

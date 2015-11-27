@@ -207,6 +207,20 @@ void DeclContextPrinter::PrintDeclContext(const DeclContext* DC,
     Out << *ND;
     break;
   }
+//@@
+  case Decl::Inline:
+    Out << "[inline] " << DC;
+    break;
+  case Decl::Execute:
+    Out << "[execute] " << DC;
+    break;
+  case Decl::Def:
+    Out << "[def] " << DC;
+    break;
+  case Decl::QuasiQuotes:
+    Out << "[qq] " << DC;
+    break;
+//@@
   case Decl::Enum: {
     const EnumDecl* ED = cast<EnumDecl>(DC);
     if (ED->isCompleteDefinition())

@@ -153,9 +153,6 @@ static bool HasARCRuntime(CompilerInvocation &origCI) {
   if (triple.isiOS())
     return triple.getOSMajorVersion() >= 5;
 
-  if (triple.isWatchOS())
-    return true;
-
   if (triple.getOS() == llvm::Triple::Darwin)
     return triple.getOSMajorVersion() >= 11;
 
@@ -209,8 +206,7 @@ createInvocationForMigration(CompilerInvocation &origCI,
   WarnOpts.push_back("error=arc-unsafe-retained-assign");
   CInvok->getDiagnosticOpts().Warnings = std::move(WarnOpts);
 
-  CInvok->getLangOpts()->ObjCWeakRuntime = HasARCRuntime(origCI);
-  CInvok->getLangOpts()->ObjCWeak = CInvok->getLangOpts()->ObjCWeakRuntime;
+  CInvok->getLangOpts()->ObjCARCWeak = HasARCRuntime(origCI);
 
   return CInvok.release();
 }

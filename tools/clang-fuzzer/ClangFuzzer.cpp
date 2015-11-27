@@ -20,7 +20,7 @@
 
 using namespace clang;
 
-extern "C" int LLVMFuzzerTestOneInput(uint8_t *data, size_t size) {
+extern "C" void LLVMFuzzerTestOneInput(uint8_t *data, size_t size) {
   std::string s((const char *)data, size);
   llvm::opt::ArgStringList CC1Args;
   CC1Args.push_back("-cc1");
@@ -43,5 +43,4 @@ extern "C" int LLVMFuzzerTestOneInput(uint8_t *data, size_t size) {
       std::make_shared<PCHContainerOperations>();
   action->runInvocation(Invocation.release(), Files.get(), PCHContainerOps,
                         &Diags);
-  return 0;
 }

@@ -156,10 +156,6 @@ struct PragmaUnrollHintHandler : public PragmaHandler {
                     Token &FirstToken) override;
 };
 
-struct PragmaMSRuntimeChecksHandler : public EmptyPragmaHandler {
-  PragmaMSRuntimeChecksHandler() : EmptyPragmaHandler("runtime_checks") {}
-};
-
 }  // end namespace
 
 void Parser::initializePragmaHandlers() {
@@ -226,8 +222,6 @@ void Parser::initializePragmaHandlers() {
     PP.AddPragmaHandler(MSCodeSeg.get());
     MSSection.reset(new PragmaMSPragma("section"));
     PP.AddPragmaHandler(MSSection.get());
-    MSRuntimeChecks.reset(new PragmaMSRuntimeChecksHandler());
-    PP.AddPragmaHandler(MSRuntimeChecks.get());
   }
 
   OptimizeHandler.reset(new PragmaOptimizeHandler(Actions));
@@ -294,8 +288,6 @@ void Parser::resetPragmaHandlers() {
     MSCodeSeg.reset();
     PP.RemovePragmaHandler(MSSection.get());
     MSSection.reset();
-    PP.RemovePragmaHandler(MSRuntimeChecks.get());
-    MSRuntimeChecks.reset();
   }
 
   PP.RemovePragmaHandler("STDC", FPContractHandler.get());
@@ -334,7 +326,6 @@ void Parser::HandlePragmaVisibility() {
   Actions.ActOnPragmaVisibility(VisType, VisLoc);
 }
 
-namespace {
 struct PragmaPackInfo {
   Sema::PragmaPackKind Kind;
   IdentifierInfo *Name;
@@ -342,7 +333,6 @@ struct PragmaPackInfo {
   SourceLocation LParenLoc;
   SourceLocation RParenLoc;
 };
-} // end anonymous namespace
 
 void Parser::HandlePragmaPack() {
   assert(Tok.is(tok::annot_pragma_pack));
@@ -752,13 +742,11 @@ bool Parser::HandlePragmaMSInitSeg(StringRef PragmaName,
   return true;
 }
 
-namespace {
 struct PragmaLoopHintInfo {
   Token PragmaName;
   Token Option;
   ArrayRef<Token> Toks;
 };
-} // end anonymous namespace
 
 static std::string PragmaLoopHintString(Token PragmaName, Token Option) {
   std::string PragmaString;

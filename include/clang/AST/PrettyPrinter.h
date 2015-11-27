@@ -36,6 +36,9 @@ struct PrintingPolicy {
   /// \brief Create a default printing policy for C.
   PrintingPolicy(const LangOptions &LO)
     : LangOpts(LO), Indentation(2), SuppressSpecifiers(false),
+//@@
+      SuppressDissambiguationKeywordsForUnqualifiedIds(false),
+//@@
       SuppressTagKeyword(false), SuppressTag(false), SuppressScope(false),
       SuppressUnwrittenScope(false), SuppressInitializers(false),
       ConstantArraySizeAsWritten(false), AnonymousTagLocations(true),
@@ -65,6 +68,24 @@ struct PrintingPolicy {
   /// \c true when we print "y", so that we suppress printing the
   /// "const int" type specifier and instead only print the "*y".
   bool SuppressSpecifiers : 1;
+
+//@@
+  /// \brief Whether type printing should skip printing the dissambiguation
+  /// keywrods (i.e. typename, template) for unqualified identifiers
+  /// (i.e. unkown types).
+  ///
+  /// This is used to allow both printing it in cases where dissambiguation
+  /// is needed (e.g. \code .<typename T>. \endcode) as well as when it 
+  /// should be skiped (e.g.
+  ///
+  /// \code
+  /// void* name = .<typename T>.;
+  /// void* decl = .<class .~name {};>.;
+  /// \endcode
+  ///
+  /// ).
+  bool SuppressDissambiguationKeywordsForUnqualifiedIds : 1;
+//@@
 
   /// \brief Whether type printing should skip printing the tag keyword.
   ///

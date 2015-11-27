@@ -21,7 +21,6 @@
 #include "clang/AST/DeclVisitor.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/AST/TypeVisitor.h"
-#include "clang/Basic/Builtins.h"
 #include "clang/Basic/Module.h"
 #include "clang/Basic/SourceManager.h"
 #include "llvm/Support/raw_ostream.h"
@@ -448,7 +447,6 @@ namespace  {
         const ClassTemplatePartialSpecializationDecl *D);
     void VisitClassScopeFunctionSpecializationDecl(
         const ClassScopeFunctionSpecializationDecl *D);
-    void VisitBuiltinTemplateDecl(const BuiltinTemplateDecl *D);
     void VisitVarTemplateDecl(const VarTemplateDecl *D);
     void VisitVarTemplateSpecializationDecl(
         const VarTemplateSpecializationDecl *D);
@@ -489,6 +487,9 @@ namespace  {
 
     // Exprs
     void VisitExpr(const Expr *Node);
+//@@
+    void VisitQuasiQuoteExpr(const QuasiQuoteExpr *Node);
+//@@
     void VisitCastExpr(const CastExpr *Node);
     void VisitDeclRefExpr(const DeclRefExpr *Node);
     void VisitPredefinedExpr(const PredefinedExpr *Node);
@@ -1335,11 +1336,6 @@ void ASTDumper::VisitVarTemplateDecl(const VarTemplateDecl *D) {
   VisitTemplateDecl(D, false);
 }
 
-void ASTDumper::VisitBuiltinTemplateDecl(const BuiltinTemplateDecl *D) {
-  dumpName(D);
-  dumpTemplateParameters(D->getTemplateParameters());
-}
-
 void ASTDumper::VisitVarTemplateSpecializationDecl(
     const VarTemplateSpecializationDecl *D) {
   dumpTemplateArgumentList(D->getTemplateArgs());
@@ -1733,6 +1729,47 @@ void ASTDumper::VisitExpr(const Expr *Node) {
   }
 }
 
+//@@
+void ASTDumper::VisitQuasiQuoteExpr(const QuasiQuoteExpr *Node) {
+  VisitExpr(Node);
+  const QuotedElements *Elems = Node->getElements();
+  {
+    ColorScope Color(*this, ValueColor);
+    switch(Elems->getType()) {
+      case QuotedElements::AST_Expression:
+        OS << " Expression"; break;
+      case QuotedElements::AST_StatementOrDeclarationList:
+        OS << " Statement or declaration list"; break;
+      case QuotedElements::AST_ParameterDeclaration:
+        OS << " Parameters"; break;
+      case QuotedElements::AST_DeclContext:
+        OS << " Decl context (class/struct/enum body)"; break;
+      case QuotedElements::AST_TypeInfo:
+         OS << " Type"; break;
+      default: break;
+    }
+  }
+  switch(Elems->getType()) {
+    case QuotedElements::AST_Expression:
+	case QuotedElements::AST_StatementOrDeclarationList:
+      break;	// handled by child traversal
+    case QuotedElements::AST_ParameterDeclaration: {
+      const QuotedElements::ParamVector* V = Elems->getParams();
+      for (unsigned i = 0; i < V->size(); ++i)
+        dumpDecl((*V)[i].Param);
+      break;
+    }
+    case QuotedElements::AST_DeclContext:
+      dumpDeclContext(Elems->getDeclContext());
+      break;
+    case QuotedElements::AST_TypeInfo:
+      dumpTypeAsChild(Elems->getTypeInfo()->getType());
+      break;
+    default: break;
+  }
+}
+//@@
+
 static void dumpBasePath(raw_ostream &OS, const CastExpr *Node) {
   if (Node->path_empty())
     return;
@@ -2024,9 +2061,6 @@ void ASTDumper::VisitSizeOfPackExpr(const SizeOfPackExpr *Node) {
   VisitExpr(Node);
   dumpPointer(Node->getPack());
   dumpName(Node->getPack());
-  if (Node->isPartiallySubstituted())
-    for (const auto &A : Node->getPartialArguments())
-      dumpTemplateArgument(A);
 }
 
 

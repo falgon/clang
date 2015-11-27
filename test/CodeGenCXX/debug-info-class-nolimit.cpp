@@ -1,7 +1,6 @@
-// RUN: %clang_cc1 -triple x86_64-unk-unk -debug-info-kind=standalone -o - -emit-llvm %s | FileCheck %s
-// On Darwin, "full" debug info is the default, so really these tests are
-// identical, as cc1 no longer chooses the effective value of DebugInfoKind.
-// RUN: %clang_cc1 -triple x86_64-apple-darwin -debug-info-kind=standalone -o - -emit-llvm %s | FileCheck %s
+// RUN: %clang_cc1 -triple x86_64-unk-unk -fstandalone-debug -o - -emit-llvm -g %s | FileCheck %s
+// On Darwin, this should be the default:
+// RUN: %clang_cc1 -triple x86_64-apple-darwin -o - -emit-llvm -g %s | FileCheck %s
 
 namespace rdar14101097_1 { // see also PR16214
 // Check that we emit debug info for the definition of a struct if the
@@ -34,3 +33,4 @@ void bar() {
 struct foo {
 };
 }
+

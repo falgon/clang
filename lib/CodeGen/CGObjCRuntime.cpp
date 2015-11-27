@@ -136,13 +136,12 @@ LValue CGObjCRuntime::EmitValueForIvarAtOffset(CodeGen::CodeGenFunction &CGF,
                              CGF.CGM.getContext().toBits(StorageSize),
                              CharUnits::fromQuantity(0)));
 
-  Address Addr(V, Alignment);
-  Addr = CGF.Builder.CreateElementBitCast(Addr,
-                                   llvm::Type::getIntNTy(CGF.getLLVMContext(),
+  V = CGF.Builder.CreateBitCast(V,
+                                llvm::Type::getIntNPtrTy(CGF.getLLVMContext(),
                                                          Info->StorageSize));
-  return LValue::MakeBitfield(Addr, *Info,
+  return LValue::MakeBitfield(V, *Info,
                               IvarTy.withCVRQualifiers(CVRQualifiers),
-                              AlignmentSource::Decl);
+                              Alignment);
 }
 
 namespace {
@@ -256,7 +255,24 @@ void CGObjCRuntime::EmitTryCatchStmt(CodeGenFunction &CGF,
       llvm::Value *CastExn = CGF.Builder.CreateBitCast(Exn, CatchType);
 
       CGF.EmitAutoVarDecl(*CatchParam);
-      EmitInitOfCatchParam(CGF, CastExn, CatchParam);
+
+      llvm::Value *CatchParamAddr = CGF.GetAddrOfLocalVar(CatchParam);
+
+      switch (CatchParam->getType().getQualifiers().getObjCLifetime()) {
+      case Qualifiers::OCL_Strong:
+        CastExn = CGF.EmitARCRetainNonBlock(CastExn);
+        // fallthrough
+
+      case Qualifiers::OCL_None:
+      case Qualifiers::OCL_ExplicitNone:
+      case Qualifiers::OCL_Autoreleasing:
+        CGF.Builder.CreateStore(CastExn, CatchParamAddr);
+        break;
+
+      case Qualifiers::OCL_Weak:
+        CGF.EmitARCInitWeak(CatchParamAddr, CastExn);
+        break;
+      }
     }
 
     CGF.ObjCEHValueStack.push_back(Exn);
@@ -278,30 +294,6 @@ void CGObjCRuntime::EmitTryCatchStmt(CodeGenFunction &CGF,
 
   if (Cont.isValid())
     CGF.EmitBlock(Cont.getBlock());
-}
-
-void CGObjCRuntime::EmitInitOfCatchParam(CodeGenFunction &CGF,
-                                         llvm::Value *exn,
-                                         const VarDecl *paramDecl) {
-
-  Address paramAddr = CGF.GetAddrOfLocalVar(paramDecl);
-
-  switch (paramDecl->getType().getQualifiers().getObjCLifetime()) {
-  case Qualifiers::OCL_Strong:
-    exn = CGF.EmitARCRetainNonBlock(exn);
-    // fallthrough
-
-  case Qualifiers::OCL_None:
-  case Qualifiers::OCL_ExplicitNone:
-  case Qualifiers::OCL_Autoreleasing:
-    CGF.Builder.CreateStore(exn, paramAddr);
-    return;
-
-  case Qualifiers::OCL_Weak:
-    CGF.EmitARCInitWeak(paramAddr, exn);
-    return;
-  }
-  llvm_unreachable("invalid ownership qualifier");
 }
 
 namespace {

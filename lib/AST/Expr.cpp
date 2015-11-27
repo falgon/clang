@@ -1060,12 +1060,49 @@ getLocationOfByte(unsigned ByteNo, const SourceManager &SM,
   }
 }
 
+//@@
+void QuotedElements::clear() {
+	switch(type) {
+		case AST_Expression:											value.expr = nullptr;	break;
+		case AST_StatementOrDeclarationList:	delete[]value.stmts;	value.stmts = nullptr;	break;
+		case AST_ParameterDeclaration:			delete	value.params;	value.params= nullptr;	break;
+		case AST_DeclContext:											value.dc	= nullptr;	break;
+		case AST_TypeInfo:												value.type	= nullptr;	break;
+		default:	break;
+	}
+	size = 0;
+	type = AST_Invalid;
+}
+
+void QuotedElements::setStmts(const StmtVector& stmts) {
+	clear();
+	type = AST_StatementOrDeclarationList;
+	size = stmts.size();
+	value.stmts = new Stmt*[size + 1];
+	unsigned i = 0;
+	for (Stmt *S : stmts)
+		value.stmts[i++] = S;
+	value.stmts[i] = nullptr;
+}
+
+QuotedElements::child_range QuotedElements::children() {
+	switch(type) {
+		case AST_Expression:					return child_range((Stmt**)&value.expr, (Stmt**)&value.expr + 1);
+		case AST_StatementOrDeclarationList:	return child_range(value.stmts, value.stmts + size);
+		default:								return child_range(child_iterator(), child_iterator());
+	}
+}
+//@@
 
 
 /// getOpcodeStr - Turn an Opcode enum value into the punctuation char it
 /// corresponds to, e.g. "sizeof" or "[pre]++".
 StringRef UnaryOperator::getOpcodeStr(Opcode Op) {
   switch (Op) {
+//@@
+  case UO_Escape: return ".~";
+  case UO_Inline: return ".!";
+//@@
   case UO_PostInc: return "++";
   case UO_PostDec: return "--";
   case UO_PreInc:  return "++";
@@ -1079,7 +1116,6 @@ StringRef UnaryOperator::getOpcodeStr(Opcode Op) {
   case UO_Real:    return "__real";
   case UO_Imag:    return "__imag";
   case UO_Extension: return "__extension__";
-  case UO_Coawait: return "co_await";
   }
   llvm_unreachable("Unknown unary operator");
 }
@@ -1096,7 +1132,6 @@ UnaryOperator::getOverloadedOpcode(OverloadedOperatorKind OO, bool Postfix) {
   case OO_Minus:      return UO_Minus;
   case OO_Tilde:      return UO_Not;
   case OO_Exclaim:    return UO_LNot;
-  case OO_Coawait:    return UO_Coawait;
   }
 }
 
@@ -1110,7 +1145,6 @@ OverloadedOperatorKind UnaryOperator::getOverloadedOperator(Opcode Opc) {
   case UO_Minus: return OO_Minus;
   case UO_Not: return OO_Tilde;
   case UO_LNot: return OO_Exclaim;
-  case UO_Coawait: return OO_Coawait;
   default: return OO_None;
   }
 }
@@ -2046,6 +2080,10 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     const UnaryOperator *UO = cast<UnaryOperator>(this);
 
     switch (UO->getOpcode()) {
+//@@
+	case UO_Escape:
+	case UO_Inline:
+//@@
     case UO_Plus:
     case UO_Minus:
     case UO_AddrOf:
@@ -2053,9 +2091,6 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     case UO_LNot:
     case UO_Deref:
       break;
-    case UO_Coawait:
-      // This is just the 'operator co_await' call inside the guts of a
-      // dependent co_await call.
     case UO_PostInc:
     case UO_PostDec:
     case UO_PreInc:
@@ -3004,7 +3039,6 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     return true;
 
   case MSPropertyRefExprClass:
-  case MSPropertySubscriptExprClass:
   case CompoundAssignOperatorClass:
   case VAArgExprClass:
   case AtomicExprClass:
@@ -3012,8 +3046,6 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case CXXNewExprClass:
   case CXXDeleteExprClass:
   case ExprWithCleanupsClass:
-  case CoawaitExprClass:
-  case CoyieldExprClass:
     // These always have a side-effect.
     return true;
 
@@ -3166,6 +3198,18 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
     if (IncludePossibleEffects)
       return true;
     break;
+
+//@@
+  case QuasiQuoteExprClass: {
+    //@@TODO: should get and check all escapes
+    for (const Stmt *SubStmt : cast<QuasiQuoteExpr>(this)->getEscapes())
+      if (SubStmt &&
+        cast<Expr>(SubStmt)->HasSideEffects(Ctx, IncludePossibleEffects))
+      return true;
+
+  return false;
+  }
+//@@
   }
 
   // Recurse to children.
@@ -3517,6 +3561,285 @@ void ExtVectorElementExpr::getEncodedElementAccess(
 
     Elts.push_back(Index);
   }
+}
+
+ObjCMessageExpr::ObjCMessageExpr(QualType T,
+                                 ExprValueKind VK,
+                                 SourceLocation LBracLoc,
+                                 SourceLocation SuperLoc,
+                                 bool IsInstanceSuper,
+                                 QualType SuperType,
+                                 Selector Sel, 
+                                 ArrayRef<SourceLocation> SelLocs,
+                                 SelectorLocationsKind SelLocsK,
+                                 ObjCMethodDecl *Method,
+                                 ArrayRef<Expr *> Args,
+                                 SourceLocation RBracLoc,
+                                 bool isImplicit)
+  : Expr(ObjCMessageExprClass, T, VK, OK_Ordinary,
+         /*TypeDependent=*/false, /*ValueDependent=*/false,
+         /*InstantiationDependent=*/false,
+         /*ContainsUnexpandedParameterPack=*/false),
+    SelectorOrMethod(reinterpret_cast<uintptr_t>(Method? Method
+                                                       : Sel.getAsOpaquePtr())),
+    Kind(IsInstanceSuper? SuperInstance : SuperClass),
+    HasMethod(Method != nullptr), IsDelegateInitCall(false),
+    IsImplicit(isImplicit), SuperLoc(SuperLoc), LBracLoc(LBracLoc),
+    RBracLoc(RBracLoc)
+{
+  initArgsAndSelLocs(Args, SelLocs, SelLocsK);
+  setReceiverPointer(SuperType.getAsOpaquePtr());
+}
+
+ObjCMessageExpr::ObjCMessageExpr(QualType T,
+                                 ExprValueKind VK,
+                                 SourceLocation LBracLoc,
+                                 TypeSourceInfo *Receiver,
+                                 Selector Sel,
+                                 ArrayRef<SourceLocation> SelLocs,
+                                 SelectorLocationsKind SelLocsK,
+                                 ObjCMethodDecl *Method,
+                                 ArrayRef<Expr *> Args,
+                                 SourceLocation RBracLoc,
+                                 bool isImplicit)
+  : Expr(ObjCMessageExprClass, T, VK, OK_Ordinary, T->isDependentType(),
+         T->isDependentType(), T->isInstantiationDependentType(),
+         T->containsUnexpandedParameterPack()),
+    SelectorOrMethod(reinterpret_cast<uintptr_t>(Method? Method
+                                                       : Sel.getAsOpaquePtr())),
+    Kind(Class),
+    HasMethod(Method != nullptr), IsDelegateInitCall(false),
+    IsImplicit(isImplicit), LBracLoc(LBracLoc), RBracLoc(RBracLoc)
+{
+  initArgsAndSelLocs(Args, SelLocs, SelLocsK);
+  setReceiverPointer(Receiver);
+}
+
+ObjCMessageExpr::ObjCMessageExpr(QualType T,
+                                 ExprValueKind VK,
+                                 SourceLocation LBracLoc,
+                                 Expr *Receiver,
+                                 Selector Sel, 
+                                 ArrayRef<SourceLocation> SelLocs,
+                                 SelectorLocationsKind SelLocsK,
+                                 ObjCMethodDecl *Method,
+                                 ArrayRef<Expr *> Args,
+                                 SourceLocation RBracLoc,
+                                 bool isImplicit)
+  : Expr(ObjCMessageExprClass, T, VK, OK_Ordinary, Receiver->isTypeDependent(),
+         Receiver->isTypeDependent(),
+         Receiver->isInstantiationDependent(),
+         Receiver->containsUnexpandedParameterPack()),
+    SelectorOrMethod(reinterpret_cast<uintptr_t>(Method? Method
+                                                       : Sel.getAsOpaquePtr())),
+    Kind(Instance),
+    HasMethod(Method != nullptr), IsDelegateInitCall(false),
+    IsImplicit(isImplicit), LBracLoc(LBracLoc), RBracLoc(RBracLoc)
+{
+  initArgsAndSelLocs(Args, SelLocs, SelLocsK);
+  setReceiverPointer(Receiver);
+}
+
+void ObjCMessageExpr::initArgsAndSelLocs(ArrayRef<Expr *> Args,
+                                         ArrayRef<SourceLocation> SelLocs,
+                                         SelectorLocationsKind SelLocsK) {
+  setNumArgs(Args.size());
+  Expr **MyArgs = getArgs();
+  for (unsigned I = 0; I != Args.size(); ++I) {
+    if (Args[I]->isTypeDependent())
+      ExprBits.TypeDependent = true;
+    if (Args[I]->isValueDependent())
+      ExprBits.ValueDependent = true;
+    if (Args[I]->isInstantiationDependent())
+      ExprBits.InstantiationDependent = true;
+    if (Args[I]->containsUnexpandedParameterPack())
+      ExprBits.ContainsUnexpandedParameterPack = true;
+  
+    MyArgs[I] = Args[I];
+  }
+
+  SelLocsKind = SelLocsK;
+  if (!isImplicit()) {
+    if (SelLocsK == SelLoc_NonStandard)
+      std::copy(SelLocs.begin(), SelLocs.end(), getStoredSelLocs());
+  }
+}
+
+ObjCMessageExpr *ObjCMessageExpr::Create(const ASTContext &Context, QualType T,
+                                         ExprValueKind VK,
+                                         SourceLocation LBracLoc,
+                                         SourceLocation SuperLoc,
+                                         bool IsInstanceSuper,
+                                         QualType SuperType,
+                                         Selector Sel, 
+                                         ArrayRef<SourceLocation> SelLocs,
+                                         ObjCMethodDecl *Method,
+                                         ArrayRef<Expr *> Args,
+                                         SourceLocation RBracLoc,
+                                         bool isImplicit) {
+  assert((!SelLocs.empty() || isImplicit) &&
+         "No selector locs for non-implicit message");
+  ObjCMessageExpr *Mem;
+  SelectorLocationsKind SelLocsK = SelectorLocationsKind();
+  if (isImplicit)
+    Mem = alloc(Context, Args.size(), 0);
+  else
+    Mem = alloc(Context, Args, RBracLoc, SelLocs, Sel, SelLocsK);
+  return new (Mem) ObjCMessageExpr(T, VK, LBracLoc, SuperLoc, IsInstanceSuper,
+                                   SuperType, Sel, SelLocs, SelLocsK,
+                                   Method, Args, RBracLoc, isImplicit);
+}
+
+ObjCMessageExpr *ObjCMessageExpr::Create(const ASTContext &Context, QualType T,
+                                         ExprValueKind VK,
+                                         SourceLocation LBracLoc,
+                                         TypeSourceInfo *Receiver,
+                                         Selector Sel, 
+                                         ArrayRef<SourceLocation> SelLocs,
+                                         ObjCMethodDecl *Method,
+                                         ArrayRef<Expr *> Args,
+                                         SourceLocation RBracLoc,
+                                         bool isImplicit) {
+  assert((!SelLocs.empty() || isImplicit) &&
+         "No selector locs for non-implicit message");
+  ObjCMessageExpr *Mem;
+  SelectorLocationsKind SelLocsK = SelectorLocationsKind();
+  if (isImplicit)
+    Mem = alloc(Context, Args.size(), 0);
+  else
+    Mem = alloc(Context, Args, RBracLoc, SelLocs, Sel, SelLocsK);
+  return new (Mem) ObjCMessageExpr(T, VK, LBracLoc, Receiver, Sel,
+                                   SelLocs, SelLocsK, Method, Args, RBracLoc,
+                                   isImplicit);
+}
+
+ObjCMessageExpr *ObjCMessageExpr::Create(const ASTContext &Context, QualType T,
+                                         ExprValueKind VK,
+                                         SourceLocation LBracLoc,
+                                         Expr *Receiver,
+                                         Selector Sel,
+                                         ArrayRef<SourceLocation> SelLocs,
+                                         ObjCMethodDecl *Method,
+                                         ArrayRef<Expr *> Args,
+                                         SourceLocation RBracLoc,
+                                         bool isImplicit) {
+  assert((!SelLocs.empty() || isImplicit) &&
+         "No selector locs for non-implicit message");
+  ObjCMessageExpr *Mem;
+  SelectorLocationsKind SelLocsK = SelectorLocationsKind();
+  if (isImplicit)
+    Mem = alloc(Context, Args.size(), 0);
+  else
+    Mem = alloc(Context, Args, RBracLoc, SelLocs, Sel, SelLocsK);
+  return new (Mem) ObjCMessageExpr(T, VK, LBracLoc, Receiver, Sel,
+                                   SelLocs, SelLocsK, Method, Args, RBracLoc,
+                                   isImplicit);
+}
+
+ObjCMessageExpr *ObjCMessageExpr::CreateEmpty(const ASTContext &Context,
+                                              unsigned NumArgs,
+                                              unsigned NumStoredSelLocs) {
+  ObjCMessageExpr *Mem = alloc(Context, NumArgs, NumStoredSelLocs);
+  return new (Mem) ObjCMessageExpr(EmptyShell(), NumArgs);
+}
+
+ObjCMessageExpr *ObjCMessageExpr::alloc(const ASTContext &C,
+                                        ArrayRef<Expr *> Args,
+                                        SourceLocation RBraceLoc,
+                                        ArrayRef<SourceLocation> SelLocs,
+                                        Selector Sel,
+                                        SelectorLocationsKind &SelLocsK) {
+  SelLocsK = hasStandardSelectorLocs(Sel, SelLocs, Args, RBraceLoc);
+  unsigned NumStoredSelLocs = (SelLocsK == SelLoc_NonStandard) ? SelLocs.size()
+                                                               : 0;
+  return alloc(C, Args.size(), NumStoredSelLocs);
+}
+
+ObjCMessageExpr *ObjCMessageExpr::alloc(const ASTContext &C,
+                                        unsigned NumArgs,
+                                        unsigned NumStoredSelLocs) {
+  unsigned Size = sizeof(ObjCMessageExpr) + sizeof(void *) + 
+    NumArgs * sizeof(Expr *) + NumStoredSelLocs * sizeof(SourceLocation);
+  return (ObjCMessageExpr *)C.Allocate(Size,
+                                     llvm::AlignOf<ObjCMessageExpr>::Alignment);
+}
+
+void ObjCMessageExpr::getSelectorLocs(
+                               SmallVectorImpl<SourceLocation> &SelLocs) const {
+  for (unsigned i = 0, e = getNumSelectorLocs(); i != e; ++i)
+    SelLocs.push_back(getSelectorLoc(i));
+}
+
+SourceRange ObjCMessageExpr::getReceiverRange() const {
+  switch (getReceiverKind()) {
+  case Instance:
+    return getInstanceReceiver()->getSourceRange();
+
+  case Class:
+    return getClassReceiverTypeInfo()->getTypeLoc().getSourceRange();
+
+  case SuperInstance:
+  case SuperClass:
+    return getSuperLoc();
+  }
+
+  llvm_unreachable("Invalid ReceiverKind!");
+}
+
+Selector ObjCMessageExpr::getSelector() const {
+  if (HasMethod)
+    return reinterpret_cast<const ObjCMethodDecl *>(SelectorOrMethod)
+                                                               ->getSelector();
+  return Selector(SelectorOrMethod); 
+}
+
+QualType ObjCMessageExpr::getReceiverType() const {
+  switch (getReceiverKind()) {
+  case Instance:
+    return getInstanceReceiver()->getType();
+  case Class:
+    return getClassReceiver();
+  case SuperInstance:
+  case SuperClass:
+    return getSuperType();
+  }
+
+  llvm_unreachable("unexpected receiver kind");
+}
+
+ObjCInterfaceDecl *ObjCMessageExpr::getReceiverInterface() const {
+  QualType T = getReceiverType();
+
+  if (const ObjCObjectPointerType *Ptr = T->getAs<ObjCObjectPointerType>())
+    return Ptr->getInterfaceDecl();
+
+  if (const ObjCObjectType *Ty = T->getAs<ObjCObjectType>())
+    return Ty->getInterface();
+
+  return nullptr;
+}
+
+QualType ObjCPropertyRefExpr::getReceiverType(const ASTContext &ctx) const {
+  if (isClassReceiver())
+    return ctx.getObjCInterfaceType(getClassReceiver());
+
+  if (isSuperReceiver())
+    return getSuperReceiverType();
+
+  return getBase()->getType();
+}
+
+StringRef ObjCBridgedCastExpr::getBridgeKindName() const {
+  switch (getBridgeKind()) {
+  case OBC_Bridge:
+    return "__bridge";
+  case OBC_BridgeTransfer:
+    return "__bridge_transfer";
+  case OBC_BridgeRetained:
+    return "__bridge_retained";
+  }
+
+  llvm_unreachable("Invalid BridgeKind!");
 }
 
 ShuffleVectorExpr::ShuffleVectorExpr(const ASTContext &C, ArrayRef<Expr*> args,
@@ -3920,6 +4243,129 @@ Stmt::child_range UnaryExprOrTypeTraitExpr::children() {
   return child_range(&Argument.Ex, &Argument.Ex + 1);
 }
 
+// ObjCMessageExpr
+Stmt::child_range ObjCMessageExpr::children() {
+  Stmt **begin;
+  if (getReceiverKind() == Instance)
+    begin = reinterpret_cast<Stmt **>(this + 1);
+  else
+    begin = reinterpret_cast<Stmt **>(getArgs());
+  return child_range(begin,
+                     reinterpret_cast<Stmt **>(getArgs() + getNumArgs()));
+}
+
+ObjCArrayLiteral::ObjCArrayLiteral(ArrayRef<Expr *> Elements, 
+                                   QualType T, ObjCMethodDecl *Method,
+                                   SourceRange SR)
+  : Expr(ObjCArrayLiteralClass, T, VK_RValue, OK_Ordinary, 
+         false, false, false, false), 
+    NumElements(Elements.size()), Range(SR), ArrayWithObjectsMethod(Method)
+{
+  Expr **SaveElements = getElements();
+  for (unsigned I = 0, N = Elements.size(); I != N; ++I) {
+    if (Elements[I]->isTypeDependent() || Elements[I]->isValueDependent())
+      ExprBits.ValueDependent = true;
+    if (Elements[I]->isInstantiationDependent())
+      ExprBits.InstantiationDependent = true;
+    if (Elements[I]->containsUnexpandedParameterPack())
+      ExprBits.ContainsUnexpandedParameterPack = true;
+    
+    SaveElements[I] = Elements[I];
+  }
+}
+
+ObjCArrayLiteral *ObjCArrayLiteral::Create(const ASTContext &C,
+                                           ArrayRef<Expr *> Elements,
+                                           QualType T, ObjCMethodDecl * Method,
+                                           SourceRange SR) {
+  void *Mem = C.Allocate(sizeof(ObjCArrayLiteral) 
+                         + Elements.size() * sizeof(Expr *));
+  return new (Mem) ObjCArrayLiteral(Elements, T, Method, SR);
+}
+
+ObjCArrayLiteral *ObjCArrayLiteral::CreateEmpty(const ASTContext &C,
+                                                unsigned NumElements) {
+  
+  void *Mem = C.Allocate(sizeof(ObjCArrayLiteral) 
+                         + NumElements * sizeof(Expr *));
+  return new (Mem) ObjCArrayLiteral(EmptyShell(), NumElements);
+}
+
+ObjCDictionaryLiteral::ObjCDictionaryLiteral(
+                                             ArrayRef<ObjCDictionaryElement> VK, 
+                                             bool HasPackExpansions,
+                                             QualType T, ObjCMethodDecl *method,
+                                             SourceRange SR)
+  : Expr(ObjCDictionaryLiteralClass, T, VK_RValue, OK_Ordinary, false, false,
+         false, false),
+    NumElements(VK.size()), HasPackExpansions(HasPackExpansions), Range(SR), 
+    DictWithObjectsMethod(method)
+{
+  KeyValuePair *KeyValues = getKeyValues();
+  ExpansionData *Expansions = getExpansionData();
+  for (unsigned I = 0; I < NumElements; I++) {
+    if (VK[I].Key->isTypeDependent() || VK[I].Key->isValueDependent() ||
+        VK[I].Value->isTypeDependent() || VK[I].Value->isValueDependent())
+      ExprBits.ValueDependent = true;
+    if (VK[I].Key->isInstantiationDependent() ||
+        VK[I].Value->isInstantiationDependent())
+      ExprBits.InstantiationDependent = true;
+    if (VK[I].EllipsisLoc.isInvalid() &&
+        (VK[I].Key->containsUnexpandedParameterPack() ||
+         VK[I].Value->containsUnexpandedParameterPack()))
+      ExprBits.ContainsUnexpandedParameterPack = true;
+
+    KeyValues[I].Key = VK[I].Key;
+    KeyValues[I].Value = VK[I].Value; 
+    if (Expansions) {
+      Expansions[I].EllipsisLoc = VK[I].EllipsisLoc;
+      if (VK[I].NumExpansions)
+        Expansions[I].NumExpansionsPlusOne = *VK[I].NumExpansions + 1;
+      else
+        Expansions[I].NumExpansionsPlusOne = 0;
+    }
+  }
+}
+
+ObjCDictionaryLiteral *
+ObjCDictionaryLiteral::Create(const ASTContext &C,
+                              ArrayRef<ObjCDictionaryElement> VK, 
+                              bool HasPackExpansions,
+                              QualType T, ObjCMethodDecl *method,
+                              SourceRange SR) {
+  unsigned ExpansionsSize = 0;
+  if (HasPackExpansions)
+    ExpansionsSize = sizeof(ExpansionData) * VK.size();
+    
+  void *Mem = C.Allocate(sizeof(ObjCDictionaryLiteral) + 
+                         sizeof(KeyValuePair) * VK.size() + ExpansionsSize);
+  return new (Mem) ObjCDictionaryLiteral(VK, HasPackExpansions, T, method, SR);
+}
+
+ObjCDictionaryLiteral *
+ObjCDictionaryLiteral::CreateEmpty(const ASTContext &C, unsigned NumElements,
+                                   bool HasPackExpansions) {
+  unsigned ExpansionsSize = 0;
+  if (HasPackExpansions)
+    ExpansionsSize = sizeof(ExpansionData) * NumElements;
+  void *Mem = C.Allocate(sizeof(ObjCDictionaryLiteral) + 
+                         sizeof(KeyValuePair) * NumElements + ExpansionsSize);
+  return new (Mem) ObjCDictionaryLiteral(EmptyShell(), NumElements, 
+                                         HasPackExpansions);
+}
+
+ObjCSubscriptRefExpr *ObjCSubscriptRefExpr::Create(const ASTContext &C,
+                                                   Expr *base,
+                                                   Expr *key, QualType T, 
+                                                   ObjCMethodDecl *getMethod,
+                                                   ObjCMethodDecl *setMethod, 
+                                                   SourceLocation RB) {
+  void *Mem = C.Allocate(sizeof(ObjCSubscriptRefExpr));
+  return new (Mem) ObjCSubscriptRefExpr(base, key, T, VK_LValue, 
+                                        OK_ObjCSubscript,
+                                        getMethod, setMethod, RB);
+}
+
 AtomicExpr::AtomicExpr(SourceLocation BLoc, ArrayRef<Expr*> args,
                        QualType t, AtomicOp op, SourceLocation RP)
   : Expr(AtomicExprClass, t, VK_RValue, OK_Ordinary,
@@ -3986,30 +4432,3 @@ unsigned AtomicExpr::getNumSubExprs(AtomicOp Op) {
   }
   llvm_unreachable("unknown atomic op");
 }
-
-QualType OMPArraySectionExpr::getBaseOriginalType(Expr *Base) {
-  unsigned ArraySectionCount = 0;
-  while (auto *OASE = dyn_cast<OMPArraySectionExpr>(Base->IgnoreParens())) {
-    Base = OASE->getBase();
-    ++ArraySectionCount;
-  }
-  while (auto *ASE = dyn_cast<ArraySubscriptExpr>(Base->IgnoreParens())) {
-    Base = ASE->getBase();
-    ++ArraySectionCount;
-  }
-  auto OriginalTy = Base->getType();
-  if (auto *DRE = dyn_cast<DeclRefExpr>(Base))
-    if (auto *PVD = dyn_cast<ParmVarDecl>(DRE->getDecl()))
-      OriginalTy = PVD->getOriginalType().getNonReferenceType();
-
-  for (unsigned Cnt = 0; Cnt < ArraySectionCount; ++Cnt) {
-    if (OriginalTy->isAnyPointerType())
-      OriginalTy = OriginalTy->getPointeeType();
-    else {
-      assert (OriginalTy->isArrayType());
-      OriginalTy = OriginalTy->castAsArrayTypeUnsafe()->getElementType();
-    }
-  }
-  return OriginalTy;
-}
-

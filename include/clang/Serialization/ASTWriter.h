@@ -58,8 +58,6 @@ class OpaqueValueExpr;
 class OpenCLOptions;
 class ASTReader;
 class Module;
-class ModuleFileExtension;
-class ModuleFileExtensionWriter;
 class PreprocessedEntity;
 class PreprocessingRecord;
 class Preprocessor;
@@ -86,7 +84,6 @@ class ASTWriter : public ASTDeserializationListener,
 public:
   typedef SmallVector<uint64_t, 64> RecordData;
   typedef SmallVectorImpl<uint64_t> RecordDataImpl;
-  typedef ArrayRef<uint64_t> RecordDataRef;
 
   friend class ASTDeclWriter;
   friend class ASTStmtWriter;
@@ -378,6 +375,10 @@ private:
   /// coming from another AST file.
   SmallVector<const Decl *, 16> UpdatingVisibleDecls;
 
+  typedef llvm::SmallSetVector<const Decl *, 16> DeclsToRewriteTy;
+  /// \brief Decls that will be replaced in the current dependent AST file.
+  DeclsToRewriteTy DeclsToRewrite;
+
   /// \brief The set of Objective-C class that have categories we
   /// should serialize.
   llvm::SetVector<ObjCInterfaceDecl *> ObjCClassesWithCategories;
@@ -493,11 +494,7 @@ private:
   /// \brief A mapping from each known submodule to its ID number, which will
   /// be a positive integer.
   llvm::DenseMap<Module *, unsigned> SubmoduleIDs;
-
-  /// \brief A list of the module file extension writers.
-  std::vector<std::unique_ptr<ModuleFileExtensionWriter>>
-    ModuleFileExtensionWriters;
-
+                    
   /// \brief Retrieve or create a submodule ID for this module.
   unsigned getSubmoduleID(Module *Mod);
 
@@ -507,9 +504,10 @@ private:
                     llvm::DenseSet<Stmt *> &ParentStmts);
 
   void WriteBlockInfoBlock();
-  uint64_t WriteControlBlock(Preprocessor &PP, ASTContext &Context,
-                             StringRef isysroot, const std::string &OutputFile);
-  void WriteInputFiles(SourceManager &SourceMgr, HeaderSearchOptions &HSOpts,
+  void WriteControlBlock(Preprocessor &PP, ASTContext &Context,
+                         StringRef isysroot, const std::string &OutputFile);
+  void WriteInputFiles(SourceManager &SourceMgr,
+                       HeaderSearchOptions &HSOpts,
                        bool Modules);
   void WriteSourceManagerBlock(SourceManager &SourceMgr,
                                const Preprocessor &PP);
@@ -531,8 +529,8 @@ private:
   bool isLookupResultExternal(StoredDeclsList &Result, DeclContext *DC);
   bool isLookupResultEntirelyExternal(StoredDeclsList &Result, DeclContext *DC);
 
-  void GenerateNameLookupTable(const DeclContext *DC,
-                               llvm::SmallVectorImpl<char> &LookupTable);
+  uint32_t GenerateNameLookupTable(const DeclContext *DC,
+                                   llvm::SmallVectorImpl<char> &LookupTable);
   uint64_t WriteDeclContextLexicalBlock(ASTContext &Context, DeclContext *DC);
   uint64_t WriteDeclContextVisibleBlock(ASTContext &Context, DeclContext *DC);
   void WriteTypeDeclOffsets();
@@ -551,7 +549,6 @@ private:
   void WriteObjCCategories();
   void WriteLateParsedTemplates(Sema &SemaRef);
   void WriteOptimizePragmaOptions(Sema &SemaRef);
-  void WriteModuleFileExtension(ModuleFileExtensionWriter &Writer);
 
   unsigned DeclParmVarAbbrev;
   unsigned DeclContextLexicalAbbrev;
@@ -574,16 +571,14 @@ private:
   void WriteDecl(ASTContext &Context, Decl *D);
   void AddFunctionDefinition(const FunctionDecl *FD, RecordData &Record);
 
-  uint64_t WriteASTCore(Sema &SemaRef,
-                        StringRef isysroot, const std::string &OutputFile,
-                        Module *WritingModule);
+  void WriteASTCore(Sema &SemaRef,
+                    StringRef isysroot, const std::string &OutputFile,
+                    Module *WritingModule);
 
 public:
   /// \brief Create a new precompiled header writer that outputs to
   /// the given bitstream.
-  ASTWriter(llvm::BitstreamWriter &Stream,
-            ArrayRef<llvm::IntrusiveRefCntPtr<ModuleFileExtension>> Extensions,
-            bool IncludeTimestamps = true);
+  ASTWriter(llvm::BitstreamWriter &Stream, bool IncludeTimestamps = true);
   ~ASTWriter() override;
 
   const LangOptions &getLangOpts() const;
@@ -604,12 +599,10 @@ public:
   /// \param isysroot if non-empty, write a relocatable file whose headers
   /// are relative to the given system root. If we're writing a module, its
   /// build directory will be used in preference to this if both are available.
-  ///
-  /// \return the module signature, which eventually will be a hash of
-  /// the module but currently is merely a random 32-bit number.
-  uint64_t WriteAST(Sema &SemaRef, const std::string &OutputFile,
-                    Module *WritingModule, StringRef isysroot,
-                    bool hasErrors = false);
+  void WriteAST(Sema &SemaRef,
+                const std::string &OutputFile,
+                Module *WritingModule, StringRef isysroot,
+                bool hasErrors = false);
 
   /// \brief Emit a token.
   void AddToken(const Token &Tok, RecordDataImpl &Record);
@@ -763,11 +756,19 @@ public:
   void AddPath(StringRef Path, RecordDataImpl &Record);
 
   /// \brief Emit the current record with the given path as a blob.
-  void EmitRecordWithPath(unsigned Abbrev, RecordDataRef Record,
+  void EmitRecordWithPath(unsigned Abbrev, RecordDataImpl &Record,
                           StringRef Path);
 
   /// \brief Add a version tuple to the given record
   void AddVersionTuple(const VersionTuple &Version, RecordDataImpl &Record);
+
+  void RewriteDecl(const Decl *D) {
+    DeclsToRewrite.insert(D);
+  }
+
+  bool isRewritten(const Decl *D) const {
+    return DeclsToRewrite.count(D);
+  }
 
   /// \brief Infer the submodule ID that contains an entity at the given
   /// source location.
@@ -848,7 +849,6 @@ public:
   unsigned getExprImplicitCastAbbrev() const { return ExprImplicitCastAbbrev; }
 
   bool hasChain() const { return Chain; }
-  ASTReader *getChain() const { return Chain; }
 
   // ASTDeserializationListener implementation
   void ReaderInitialized(ASTReader *Reader) override;
@@ -873,6 +873,9 @@ public:
   void FunctionDefinitionInstantiated(const FunctionDecl *D) override;
   void AddedObjCCategoryToInterface(const ObjCCategoryDecl *CatD,
                                     const ObjCInterfaceDecl *IFD) override;
+  void AddedObjCPropertyInClassExtension(const ObjCPropertyDecl *Prop,
+                                    const ObjCPropertyDecl *OrigProp,
+                                    const ObjCCategoryDecl *ClassExt) override;
   void DeclarationMarkedUsed(const Decl *D) override;
   void DeclarationMarkedOpenMPThreadPrivate(const Decl *D) override;
   void RedefinedHiddenDefinition(const NamedDecl *D, Module *M) override;
@@ -899,13 +902,11 @@ protected:
   SmallVectorImpl<char> &getPCH() const { return Buffer->Data; }
 
 public:
-  PCHGenerator(
-    const Preprocessor &PP, StringRef OutputFile,
-    clang::Module *Module, StringRef isysroot,
-    std::shared_ptr<PCHBuffer> Buffer,
-    ArrayRef<llvm::IntrusiveRefCntPtr<ModuleFileExtension>> Extensions,
-    bool AllowASTWithErrors = false,
-    bool IncludeTimestamps = true);
+  PCHGenerator(const Preprocessor &PP, StringRef OutputFile,
+               clang::Module *Module, StringRef isysroot,
+               std::shared_ptr<PCHBuffer> Buffer,
+               bool AllowASTWithErrors = false,
+               bool IncludeTimestamps = true);
   ~PCHGenerator() override;
   void InitializeSema(Sema &S) override { SemaPtr = &S; }
   void HandleTranslationUnit(ASTContext &Ctx) override;

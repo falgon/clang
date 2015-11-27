@@ -56,7 +56,7 @@ namespace CodeGen {
   class CallArgList :
     public SmallVector<CallArg, 16> {
   public:
-    CallArgList() : StackBase(nullptr) {}
+    CallArgList() : StackBase(nullptr), StackBaseMem(nullptr) {}
 
     struct Writeback {
       /// The original argument.  Note that the argument l-value
@@ -64,7 +64,7 @@ namespace CodeGen {
       LValue Source;
 
       /// The temporary alloca.
-      Address Temporary;
+      llvm::Value *Temporary;
 
       /// A value to "use" after the writeback, or null.
       llvm::Value *ToUse;
@@ -88,9 +88,12 @@ namespace CodeGen {
                         other.Writebacks.begin(), other.Writebacks.end());
     }
 
-    void addWriteback(LValue srcLV, Address temporary,
+    void addWriteback(LValue srcLV, llvm::Value *temporary,
                       llvm::Value *toUse) {
-      Writeback writeback = { srcLV, temporary, toUse };
+      Writeback writeback;
+      writeback.Source = srcLV;
+      writeback.Temporary = temporary;
+      writeback.ToUse = toUse;
       Writebacks.push_back(writeback);
     }
 
@@ -134,6 +137,9 @@ namespace CodeGen {
     /// The stacksave call.  It dominates all of the argument evaluation.
     llvm::CallInst *StackBase;
 
+    /// The alloca holding the stackbase.  We need it to maintain SSA form.
+    llvm::AllocaInst *StackBaseMem;
+
     /// The iterator pointing to the stack restore cleanup.  We manually run and
     /// deactivate this cleanup after the call in the unexceptional case because
     /// it doesn't run in the normal order.
@@ -150,7 +156,6 @@ namespace CodeGen {
   /// function can be stored, and whether the address is volatile or not.
   class ReturnValueSlot {
     llvm::PointerIntPair<llvm::Value *, 2, unsigned int> Value;
-    CharUnits Alignment;
 
     // Return value slot flags
     enum Flags {
@@ -160,15 +165,14 @@ namespace CodeGen {
 
   public:
     ReturnValueSlot() {}
-    ReturnValueSlot(Address Addr, bool IsVolatile, bool IsUnused = false)
-      : Value(Addr.isValid() ? Addr.getPointer() : nullptr,
-              (IsVolatile ? IS_VOLATILE : 0) | (IsUnused ? IS_UNUSED : 0)),
-        Alignment(Addr.isValid() ? Addr.getAlignment() : CharUnits::Zero()) {}
+    ReturnValueSlot(llvm::Value *Value, bool IsVolatile, bool IsUnused = false)
+      : Value(Value,
+              (IsVolatile ? IS_VOLATILE : 0) | (IsUnused ? IS_UNUSED : 0)) {}
 
-    bool isNull() const { return !getValue().isValid(); }
+    bool isNull() const { return !getValue(); }
 
     bool isVolatile() const { return Value.getInt() & IS_VOLATILE; }
-    Address getValue() const { return Address(Value.getPointer(), Alignment); }
+    llvm::Value *getValue() const { return Value.getPointer(); }
     bool isUnused() const { return Value.getInt() & IS_UNUSED; }
   };
   

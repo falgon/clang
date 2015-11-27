@@ -205,103 +205,27 @@ static bool getSystemRegistryString(const char *keyPath, const char *valueName,
 #endif // USE_WIN32
 }
 
-// Convert LLVM's ArchType
-// to the corresponding name of Windows SDK libraries subfolder
-static StringRef getWindowsSDKArch(llvm::Triple::ArchType Arch) {
-  switch (Arch) {
-  case llvm::Triple::x86:
-    return "x86";
-  case llvm::Triple::x86_64:
-    return "x64";
-  case llvm::Triple::arm:
-    return "arm";
-  default:
-    return "";
-  }
-}
-
-// Find the most recent version of Universal CRT or Windows 10 SDK.
-// vcvarsqueryregistry.bat from Visual Studio 2015 sorts entries in the include
-// directory by name and uses the last one of the list.
-// So we compare entry names lexicographically to find the greatest one.
-static bool getWindows10SDKVersion(const std::string &SDKPath,
-                                   std::string &SDKVersion) {
-  SDKVersion.clear();
-
-  std::error_code EC;
-  llvm::SmallString<128> IncludePath(SDKPath);
-  llvm::sys::path::append(IncludePath, "Include");
-  for (llvm::sys::fs::directory_iterator DirIt(IncludePath, EC), DirEnd;
-       DirIt != DirEnd && !EC; DirIt.increment(EC)) {
-    if (!llvm::sys::fs::is_directory(DirIt->path()))
-      continue;
-    StringRef CandidateName = llvm::sys::path::filename(DirIt->path());
-    // If WDK is installed, there could be subfolders like "wdf" in the
-    // "Include" directory.
-    // Allow only directories which names start with "10.".
-    if (!CandidateName.startswith("10."))
-      continue;
-    if (CandidateName > SDKVersion)
-      SDKVersion = CandidateName;
-  }
-
-  return !SDKVersion.empty();
-}
-
 /// \brief Get Windows SDK installation directory.
-bool MSVCToolChain::getWindowsSDKDir(std::string &Path, int &Major,
-                                     std::string &WindowsSDKIncludeVersion,
-                                     std::string &WindowsSDKLibVersion) const {
-  std::string RegistrySDKVersion;
+bool MSVCToolChain::getWindowsSDKDir(std::string &path, int &major,
+                                     int &minor) const {
+  std::string sdkVersion;
   // Try the Windows registry.
-  if (!getSystemRegistryString(
-          "SOFTWARE\\Microsoft\\Microsoft SDKs\\Windows\\$VERSION",
-          "InstallationFolder", Path, &RegistrySDKVersion))
-    return false;
-  if (Path.empty() || RegistrySDKVersion.empty())
-    return false;
-
-  WindowsSDKIncludeVersion.clear();
-  WindowsSDKLibVersion.clear();
-  Major = 0;
-  std::sscanf(RegistrySDKVersion.c_str(), "v%d.", &Major);
-  if (Major <= 7)
-    return true;
-  if (Major == 8) {
-    // Windows SDK 8.x installs libraries in a folder whose names depend on the
-    // version of the OS you're targeting.  By default choose the newest, which
-    // usually corresponds to the version of the OS you've installed the SDK on.
-    const char *Tests[] = {"winv6.3", "win8", "win7"};
-    for (const char *Test : Tests) {
-      llvm::SmallString<128> TestPath(Path);
-      llvm::sys::path::append(TestPath, "Lib", Test);
-      if (llvm::sys::fs::exists(TestPath.c_str())) {
-        WindowsSDKLibVersion = Test;
-        break;
-      }
-    }
-    return !WindowsSDKLibVersion.empty();
-  }
-  if (Major == 10) {
-    if (!getWindows10SDKVersion(Path, WindowsSDKIncludeVersion))
-      return false;
-    WindowsSDKLibVersion = WindowsSDKIncludeVersion;
-    return true;
-  }
-  // Unsupported SDK version
-  return false;
+  bool hasSDKDir = getSystemRegistryString(
+      "SOFTWARE\\Microsoft\\Microsoft SDKs\\Windows\\$VERSION",
+      "InstallationFolder", path, &sdkVersion);
+  if (!sdkVersion.empty())
+    std::sscanf(sdkVersion.c_str(), "v%d.%d", &major, &minor);
+  return hasSDKDir && !path.empty();
 }
 
 // Gets the library path required to link against the Windows SDK.
 bool MSVCToolChain::getWindowsSDKLibraryPath(std::string &path) const {
   std::string sdkPath;
   int sdkMajor = 0;
-  std::string windowsSDKIncludeVersion;
-  std::string windowsSDKLibVersion;
+  int sdkMinor = 0;
 
   path.clear();
-  if (!getWindowsSDKDir(sdkPath, sdkMajor, windowsSDKIncludeVersion,
-                        windowsSDKLibVersion))
+  if (!getWindowsSDKDir(sdkPath, sdkMajor, sdkMinor))
     return false;
 
   llvm::SmallString<128> libPath(sdkPath);
@@ -321,54 +245,41 @@ bool MSVCToolChain::getWindowsSDKLibraryPath(std::string &path) const {
       return false;
     }
   } else {
-    const StringRef archName = getWindowsSDKArch(getArch());
-    if (archName.empty())
+    // Windows SDK 8.x installs libraries in a folder whose names depend on the
+    // version of the OS you're targeting.  By default choose the newest, which
+    // usually corresponds to the version of the OS you've installed the SDK on.
+    const char *tests[] = {"winv6.3", "win8", "win7"};
+    bool found = false;
+    for (const char *test : tests) {
+      llvm::SmallString<128> testPath(libPath);
+      llvm::sys::path::append(testPath, test);
+      if (llvm::sys::fs::exists(testPath.c_str())) {
+        libPath = testPath;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found)
       return false;
-    llvm::sys::path::append(libPath, windowsSDKLibVersion, "um", archName);
+
+    llvm::sys::path::append(libPath, "um");
+    switch (getArch()) {
+    case llvm::Triple::x86:
+      llvm::sys::path::append(libPath, "x86");
+      break;
+    case llvm::Triple::x86_64:
+      llvm::sys::path::append(libPath, "x64");
+      break;
+    case llvm::Triple::arm:
+      llvm::sys::path::append(libPath, "arm");
+      break;
+    default:
+      return false;
+    }
   }
 
   path = libPath.str();
-  return true;
-}
-
-// Check if the Include path of a specified version of Visual Studio contains
-// specific header files. If not, they are probably shipped with Universal CRT.
-bool clang::driver::toolchains::MSVCToolChain::useUniversalCRT(
-    std::string &VisualStudioDir) const {
-  llvm::SmallString<128> TestPath(VisualStudioDir);
-  llvm::sys::path::append(TestPath, "VC\\include\\stdlib.h");
-
-  return !llvm::sys::fs::exists(TestPath);
-}
-
-bool MSVCToolChain::getUniversalCRTSdkDir(std::string &Path,
-                                          std::string &UCRTVersion) const {
-  // vcvarsqueryregistry.bat for Visual Studio 2015 queries the registry
-  // for the specific key "KitsRoot10". So do we.
-  if (!getSystemRegistryString(
-          "SOFTWARE\\Microsoft\\Windows Kits\\Installed Roots", "KitsRoot10",
-          Path, nullptr))
-    return false;
-
-  return getWindows10SDKVersion(Path, UCRTVersion);
-}
-
-bool MSVCToolChain::getUniversalCRTLibraryPath(std::string &Path) const {
-  std::string UniversalCRTSdkPath;
-  std::string UCRTVersion;
-
-  Path.clear();
-  if (!getUniversalCRTSdkDir(UniversalCRTSdkPath, UCRTVersion))
-    return false;
-
-  StringRef ArchName = getWindowsSDKArch(getArch());
-  if (ArchName.empty())
-    return false;
-
-  llvm::SmallString<128> LibPath(UniversalCRTSdkPath);
-  llvm::sys::path::append(LibPath, "Lib", UCRTVersion, "ucrt", ArchName);
-
-  Path = LibPath.str();
   return true;
 }
 
@@ -508,12 +419,12 @@ bool MSVCToolChain::getVisualStudioInstallDir(std::string &path) const {
   return false;
 }
 
-void MSVCToolChain::AddSystemIncludeWithSubfolder(
-    const ArgList &DriverArgs, ArgStringList &CC1Args,
-    const std::string &folder, const Twine &subfolder1, const Twine &subfolder2,
-    const Twine &subfolder3) const {
+void MSVCToolChain::AddSystemIncludeWithSubfolder(const ArgList &DriverArgs,
+                                                  ArgStringList &CC1Args,
+                                                  const std::string &folder,
+                                                  const char *subfolder) const {
   llvm::SmallString<128> path(folder);
-  llvm::sys::path::append(path, subfolder1, subfolder2, subfolder3);
+  llvm::sys::path::append(path, subfolder);
   addSystemInclude(DriverArgs, CC1Args, path);
 }
 
@@ -523,8 +434,9 @@ void MSVCToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
     return;
 
   if (!DriverArgs.hasArg(options::OPT_nobuiltininc)) {
-    AddSystemIncludeWithSubfolder(DriverArgs, CC1Args, getDriver().ResourceDir,
-                                  "include");
+    SmallString<128> P(getDriver().ResourceDir);
+    llvm::sys::path::append(P, "include");
+    addSystemInclude(DriverArgs, CC1Args, P);
   }
 
   if (DriverArgs.hasArg(options::OPT_nostdlibinc))
@@ -548,33 +460,16 @@ void MSVCToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
   if (getVisualStudioInstallDir(VSDir)) {
     AddSystemIncludeWithSubfolder(DriverArgs, CC1Args, VSDir, "VC\\include");
 
-    if (useUniversalCRT(VSDir)) {
-      std::string UniversalCRTSdkPath;
-      std::string UCRTVersion;
-      if (getUniversalCRTSdkDir(UniversalCRTSdkPath, UCRTVersion)) {
-        AddSystemIncludeWithSubfolder(DriverArgs, CC1Args, UniversalCRTSdkPath,
-                                      "Include", UCRTVersion, "ucrt");
-      }
-    }
-
     std::string WindowsSDKDir;
-    int major;
-    std::string windowsSDKIncludeVersion;
-    std::string windowsSDKLibVersion;
-    if (getWindowsSDKDir(WindowsSDKDir, major, windowsSDKIncludeVersion,
-                         windowsSDKLibVersion)) {
+    int major, minor;
+    if (getWindowsSDKDir(WindowsSDKDir, major, minor)) {
       if (major >= 8) {
-        // Note: windowsSDKIncludeVersion is empty for SDKs prior to v10.
-        // Anyway, llvm::sys::path::append is able to manage it.
         AddSystemIncludeWithSubfolder(DriverArgs, CC1Args, WindowsSDKDir,
-                                      "include", windowsSDKIncludeVersion,
-                                      "shared");
+                                      "include\\shared");
         AddSystemIncludeWithSubfolder(DriverArgs, CC1Args, WindowsSDKDir,
-                                      "include", windowsSDKIncludeVersion,
-                                      "um");
+                                      "include\\um");
         AddSystemIncludeWithSubfolder(DriverArgs, CC1Args, WindowsSDKDir,
-                                      "include", windowsSDKIncludeVersion,
-                                      "winrt");
+                                      "include\\winrt");
       } else {
         AddSystemIncludeWithSubfolder(DriverArgs, CC1Args, WindowsSDKDir,
                                       "include");

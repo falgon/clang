@@ -33,6 +33,276 @@
 #include "llvm/ADT/SmallVector.h"
 using namespace clang;
 
+//@@
+ExprResult Parser::ParseMetaGeneratedInnerExpr() {
+	assert(Tok.isOneOf(tok::periodtilde, tok::periodexclaim) &&
+		"Not a meta-generated expr");
+
+	tok::TokenKind SavedKind = Tok.getKind();
+	bool isEscape = Tok.is(tok::periodtilde);
+	bool isInline = Tok.is(tok::periodexclaim);
+	ConsumeToken();
+	
+	if (isInline)
+		Actions.ActOnStartInlineExpr();
+	Scope *QQ = getCurScope()->getQuasiQuotesParent();
+	if (isEscape && !QQ) {
+		Diag(Tok, diag::err_escape_outside_quasi_quotes);
+		return ExprError();
+	}
+	Scope *OldScope = getCurScope();
+	DeclContext *OldDC = Actions.CurContext;
+	if (isEscape) {
+		DeclContext *QQDC = QQ->getEntity();
+		assert(isa<QuasiQuotesDecl>(QQDC));
+		Actions.CurContext = QQDC->getParent();
+		Actions.CurScope = QQ->getParent();
+		EnterScope(Scope::EscapeScope);
+	}
+
+	ExprResult Res;
+	switch(Tok.getKind()) {
+		case tok::l_paren: {
+			ParenParseOption ParenExprType = SimpleExpr;
+			ParsedType CastTy;
+			SourceLocation RParenLoc;
+			Res = ParseParenExpression(ParenExprType, false, false, CastTy, RParenLoc);
+			break;
+		}
+		case tok::identifier: {
+			IdentifierInfo &II = *Tok.getIdentifierInfo();
+			SourceLocation ILoc = ConsumeToken();
+			UnqualifiedId Name;
+			CXXScopeSpec ScopeSpec;
+			Name.setIdentifier(&II, ILoc);
+			Res = Actions.CorrectDelayedTyposInExpr(
+				Actions.ActOnIdExpression(getCurScope(), ScopeSpec,
+					SourceLocation(), Name, false, false)
+				);
+			break;
+		}
+		case tok::annot_primary_expr:
+			Res = getExprAnnotation(Tok);
+			ConsumeToken();
+			break;
+		default: 
+			Diag(Tok, diag::err_invalid_meta_generated_expr) << SavedKind << Tok.getKind();
+			Res = ExprError();
+	}
+
+	if (isEscape) {
+		ExitScope();
+		Actions.CurScope = OldScope;
+		Actions.CurContext = OldDC;
+	}
+
+	return Res;
+}
+
+ExprResult Parser::ParseMetaGeneratedExpr() {
+	assert(Tok.isOneOf(tok::periodtilde, tok::periodexclaim) &&
+		"Not a meta-generated expr");
+	tok::TokenKind SavedKind = Tok.getKind();
+	SourceLocation SavedLoc = Tok.getLocation();
+	ExprResult Res = ParseMetaGeneratedInnerExpr();
+	if (!Res.isInvalid())
+		Res = Actions.ActOnUnaryOp(getCurScope(), SavedLoc, SavedKind, Res.get());
+	if (SavedKind == tok::periodtilde && Tok.is(tok::ellipsis))
+      Res = Actions.ActOnPackExpansion(Res.get(), ConsumeToken()); 
+	return Res;
+}
+
+IdentifierInfo* Parser::ParseMetaGeneratedIdentifier(SourceLocation *Loc) {
+  assert(Tok.isOneOf(tok::periodtilde, tok::periodexclaim) &&
+    "Not a meta-generated identifier");
+  IdentifierInfo *II = nullptr;
+  if (Loc)
+    *Loc = Tok.getLocation();
+  ExprResult Res = ParseMetaGeneratedExpr();
+  if (!Res.isInvalid()) {
+    std::string str;
+    llvm::raw_string_ostream os(str);
+    Res.get()->printPretty(os, nullptr, PrintingPolicy(getLangOpts()));
+    II = PP.newIdentifierInfo(os.str());
+	II->setFETokenInfo(Res.get());
+  }
+  return II;
+}
+
+IdentifierInfo *Parser::ParseIdentifier(SourceLocation *Loc) {
+  assert(Tok.isIdentifier() && "Not an identifier");
+  IdentifierInfo *II;
+  if (Tok.is(tok::identifier)) {
+    II = Tok.getIdentifierInfo();
+    SourceLocation L = ConsumeToken();  // eat the identifier.
+    if (Loc)
+      *Loc = L;
+  }
+  else
+    II = ParseMetaGeneratedIdentifier(Loc);
+  return II;
+}
+
+bool Parser::ParseQuotedElements(QuotedElements *Elems, tok::TokenKind End) {
+	static std::stack<DiagnosticErrorTrap*> NestedErrorTraps;
+	SuppressDiagnosticsRAIIObject RAII(Diags);
+	DiagnosticErrorTrap ErrorTrap(Diags);
+	NestedErrorTraps.push(&ErrorTrap);
+
+	auto parseExpression = [&](){
+		ExprResult Res = ParseExpression();
+		if (Res.isInvalid() || ErrorTrap.hasErrorOccurred())
+			return false;
+		else {
+			Elems->setExpr(Res.get());
+			return true;
+		}
+	};
+	auto parseType = [&](){
+		TypeResult Ty = ParseTypeName();
+		if (Ty.isInvalid() || ErrorTrap.hasErrorOccurred())
+			return false;
+		else {
+			TypeSourceInfo *TInfo;
+			Actions.GetTypeFromParser(Ty.get(), &TInfo);
+			Elems->setTypeInfo(TInfo);
+			return true;
+		}
+	};
+	auto parseParameterDeclaration = [&](){
+		ParsingDeclSpec DS(*this);
+		ParsingDeclarator D(*this, DS, Declarator::FileContext);
+		ParseScope PrototypeScope(this, Scope::FunctionPrototypeScope |
+			Scope::DeclScope | Scope::FunctionDeclarationScope);
+		ParsedAttributes attrs(AttrFactory);
+		SmallVector<DeclaratorChunk::ParamInfo, 16> ParamInfo;
+		SourceLocation EllipsisLoc;
+		ParseParameterDeclarationClause(D, attrs, ParamInfo, EllipsisLoc);
+		if (ParamInfo.empty() || ErrorTrap.hasErrorOccurred())
+			return false;
+		else {
+			Elems->setParams(new QuotedElements::ParamVector(
+				ParamInfo.begin(), ParamInfo.end()));
+			return true;
+		}
+	};
+	auto parseStatementOrDeclarationList = [&](){
+		StmtVector unused;
+		QuotedElements::StmtVector Stmts;
+		while(Tok.getKind() != End) {
+			StmtResult Res = Tok.is(tok::kw_catch) ? ParseCXXCatchBlock() :
+				ParseStatementOrDeclaration(unused, false);
+			if (Res.isInvalid() || ErrorTrap.hasErrorOccurred())
+				return false;
+			else
+				Stmts.push_back(Res.get());
+		}
+		Elems->setStmts(Stmts);
+		return true;
+	};
+	auto parseTopLevelDeclarations = [&]() {
+		QuotedElements::StmtVector DeclStmts;
+		while(Tok.getKind() != End) {
+			SourceLocation StartLoc = Tok.getLocation();
+			ParsedAttributesWithRange attrs(AttrFactory);
+			MaybeParseCXX11Attributes(attrs);
+			MaybeParseMicrosoftAttributes(attrs);
+			DeclGroupPtrTy Res = ParseExternalDeclaration(attrs, nullptr, false);
+			if (!Res)
+				return false;
+			StmtResult R = Actions.ActOnDeclStmt(Res, StartLoc, Tok.getLocation());
+			if (R.isInvalid() || ErrorTrap.hasErrorOccurred())
+				return false;
+			else
+				DeclStmts.push_back(R.get());
+		}
+		Elems->setStmts(DeclStmts);
+		//TODO: check if using DeclStmts here is fine
+		return true;
+	};
+	auto parseClassBody = [&]() {
+		CXXScopeSpec SS;
+		ParsedAttributesWithRange attrs(AttrFactory);
+		IdentifierInfo *Name = PP.getIdentifierInfo("$class");
+		bool Owned = false, IsDependent = false;
+		AccessSpecifier CurAS = AS_protected;
+		Decl *TagDecl = Actions.ActOnTag(
+			getCurScope(), TST_class, Sema::TUK_Definition, SourceLocation(),
+			SS, Name, SourceLocation(), attrs.getList(), CurAS,
+			SourceLocation(), MultiTemplateParamsArg(), Owned, IsDependent,
+			SourceLocation(), false, clang::TypeResult(), false, nullptr
+		);
+		ParseScope ClassScope(this, Scope::ClassScope|Scope::DeclScope);
+		ParsingClassDefinition ParsingDef(*this, TagDecl, true, false);
+		
+		Actions.ActOnTagStartDefinition(getCurScope(), TagDecl);
+		Actions.ActOnStartCXXMemberDeclarations(getCurScope(), TagDecl,
+			SourceLocation(), false, SourceLocation());
+		while(Tok.getKind() != End) {
+			SourceLocation StartLoc = Tok.getLocation();
+			ParseCXXClassMemberDeclarationWithPragmas(
+				CurAS, attrs, DeclSpec::TST_class, TagDecl);
+			if (Tok.is(tok::r_brace) || ErrorTrap.hasErrorOccurred()) {
+				TagDecl->setInvalidDecl();
+				break;
+			}
+		}
+		Actions.ActOnFinishCXXMemberSpecification(getCurScope(), SourceLocation(),
+			TagDecl, SourceLocation(), SourceLocation(), attrs.getList());
+		SourceLocation SavedPrevTokLocation = PrevTokLocation;
+		ParseLexedAttributes(getCurrentClass());
+		ParseLexedMethodDeclarations(getCurrentClass());
+		Actions.ActOnFinishCXXMemberDecls();
+		ParseLexedMemberInitializers(getCurrentClass());
+		ParseLexedMethodDefs(getCurrentClass());
+		PrevTokLocation = SavedPrevTokLocation;
+		Actions.ActOnFinishCXXNonNestedClass(TagDecl);
+		Actions.ActOnTagFinishDefinition(getCurScope(), TagDecl, SourceLocation());
+		if (TagDecl->isInvalidDecl())
+			return false;
+		Elems->setDeclContext(cast<CXXRecordDecl>(TagDecl));
+		return true;
+	};
+
+	typedef std::function<bool (void)> ParseFunc;
+	std::vector<ParseFunc> parseFuncs {	//order is important here
+		parseType,
+		parseParameterDeclaration,
+		parseExpression,
+		parseTopLevelDeclarations,
+		parseStatementOrDeclarationList,
+		parseClassBody
+	};
+
+	bool result = false;
+	for (const ParseFunc& f : parseFuncs) {
+		TentativeParsingAction TPA(*this);
+		if (f() && Tok.getKind() == End) {
+			TPA.Commit();
+			result = true;
+			break;
+		}
+		else {
+			TPA.Revert();
+			if (PP.hasCachedTokens())
+				Tok = PP.getLastCachedToken();
+			ErrorTrap.reset();
+			DeclContext *DC = Actions.CurContext;
+			for (Decl *D : DC->decls())
+				DC->removeDecl(D);
+			Scope *S = getCurScope();
+			for (Decl *D : S->decls())
+				S->RemoveDecl(D);
+		}
+	}
+
+	NestedErrorTraps.pop();
+	if (!NestedErrorTraps.empty())
+		NestedErrorTraps.top()->reset();
+	return result;
+}
+//@@
+
 /// \brief Simple precedence-based parser for binary/ternary operators.
 ///
 /// Note: we diverge from the C99 grammar when parsing the assignment-expression
@@ -163,8 +433,6 @@ ExprResult Parser::ParseAssignmentExpression(TypeCastState isTypeCast) {
 
   if (Tok.is(tok::kw_throw))
     return ParseThrowExpression();
-  if (Tok.is(tok::kw_co_yield))
-    return ParseCoyieldExpression();
 
   ExprResult LHS = ParseCastExpression(/*isUnaryExpression=*/false,
                                        /*isAddressOfOperand=*/false,
@@ -524,7 +792,6 @@ class CastExpressionIdValidator : public CorrectionCandidateCallback {
 ///         postfix-expression
 ///         '++' unary-expression
 ///         '--' unary-expression
-/// [Coro]  'co_await' cast-expression
 ///         unary-operator cast-expression
 ///         'sizeof' unary-expression
 ///         'sizeof' '(' type-name ')'
@@ -759,7 +1026,12 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
       return ExprError();
     assert(Tok.isNot(tok::kw_decltype) && Tok.isNot(tok::kw___super));
     return ParseCastExpression(isUnaryExpression, isAddressOfOperand);
-      
+
+//@@
+  case tok::periodtilde:	 // unary-expression: '.~' cast-expression, i.e. escape 
+  case tok::periodexclaim:   // unary-expression: '.!' cast-expression, i.e. inline
+  // Both are also valid as identifiers, so fallthrough and check again below
+//@@
   case tok::identifier: {      // primary-expression: identifier
                                // unqualified-id: identifier
                                // constant: enumeration-constant
@@ -768,7 +1040,20 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
     if (getLangOpts().CPlusPlus) {
       // Avoid the unnecessary parse-time lookup in the common case
       // where the syntax forbids a type.
-      const Token &Next = NextToken();
+//@@
+//@@was:      const Token &Next = NextToken();
+      Token Next;
+      if (Tok.is(tok::identifier))
+        Next = NextToken();
+	  else {
+        TentativeParsingAction TPA(*this);
+        if (TryParseMetaGeneratedExpr() == TPResult::True)
+          Next = Tok;
+	    else
+          Next.startToken();
+        TPA.Revert();
+	  }
+//@@
 
       // If this identifier was reverted from a token ID, and the next token
       // is a parenthesis, this is likely to be a use of a type trait. Check
@@ -855,11 +1140,17 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
         // If TryAnnotateTypeOrScopeToken annotates the token, tail recurse.
         if (TryAnnotateTypeOrScopeToken())
           return ExprError();
-        if (!Tok.is(tok::identifier))
+        if (!Tok.isIdentifier(/*@@was:tok::identifier*/))
           return ParseCastExpression(isUnaryExpression, isAddressOfOperand);
       }
     }
 
+//@@
+    if (!Tok.is(tok::identifier)) {	//treat as unary-expression
+      Res = ParseMetaGeneratedExpr();
+      break;
+    }
+//@@
     // Consume the identifier so that we can see if it is followed by a '(' or
     // '.'.
     IdentifierInfo &II = *Tok.getIdentifierInfo();
@@ -1043,15 +1334,41 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
       Res = Actions.ActOnUnaryOp(getCurScope(), SavedLoc, SavedKind, Res.get());
     return Res;
   }
+//@@
+  case tok::periodless: {   // unary-expression: '.<' quotedElements '>.', i.e. quasi-quotes
+	  unsigned ScopeFlags = Scope::BreakScope	| Scope::ContinueScope	|
+							Scope::ControlScope | Scope::DeclScope		|
+							Scope::FnScope		| Scope::BlockScope		|
+							Scope::ClassScope	| Scope::QuasiQuotesScope;
+      ParseScope QuasiQuotesScope(this, ScopeFlags);
 
-  case tok::kw_co_await: {  // unary-expression: 'co_await' cast-expression
-    SourceLocation CoawaitLoc = ConsumeToken();
-    Res = ParseCastExpression(false);
-    if (!Res.isInvalid())
-      Res = Actions.ActOnCoawaitExpr(getCurScope(), CoawaitLoc, Res.get());
-    return Res;
+	  SourceLocation StartLoc = ConsumeToken();
+	  QuotedElements *Elems = Actions.ActOnStartQuasiQuoteExpr(StartLoc);
+	  SourceLocation EndLoc;
+	  if (ParseQuotedElements(Elems, tok::greaterperiod)) {
+		  if (TryConsumeToken(tok::greaterperiod, EndLoc))
+		    Res = Actions.ActOnEndQuasiQuoteExpr(StartLoc, EndLoc, Elems);
+	      else {
+			Actions.ActOnQuasiQuoteExprError();
+		    Res = ExprError(Diag(Tok, diag::err_expected_after) <<
+			  "quasi-quote definition" << tok::greaterperiod);
+		  }
+	  }
+	  else {
+		  Actions.ActOnQuasiQuoteExprError();
+		  SkipUntil(tok::greaterperiod);
+          Diag(PrevTokLocation, diag::err_invalid_quasi_quote_elements)
+            << SourceRange(StartLoc, PrevTokLocation);
+          SourceManager& SM = PP.getSourceManager();
+          unsigned StartLine = SM.getPresumedLineNumber(SM.getFileLoc(StartLoc));
+		  unsigned EndLine = SM.getPresumedLineNumber(SM.getFileLoc(PrevTokLocation));
+          if (StartLine != EndLine)
+            Diag(StartLoc, diag::note_quasi_quotes_start);
+		  Res = ExprError();
+	  }
+	  return Res;
   }
-
+//@@
   case tok::kw___extension__:{//unary-expression:'__extension__' cast-expr [GNU]
     // __extension__ silences extension warnings in the subexpression.
     ExtensionRAIIObject O(Diags);  // Use RAII to do this.
@@ -1199,7 +1516,11 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
     Token Next = NextToken();
     if (Next.is(tok::annot_template_id)) {
       TemplateIdAnnotation *TemplateId = takeTemplateIdAnnotation(Next);
-      if (TemplateId->Kind == TNK_Type_template) {
+      if (TemplateId->Kind == TNK_Type_template
+//@@
+         || TemplateId->Kind == TNK_Dependent_template_name
+//@@
+         ) {
         // We have a qualified template-id that we know refers to a
         // type, translate it into a type and continue parsing as a
         // cast expression.
@@ -1219,7 +1540,12 @@ ExprResult Parser::ParseCastExpression(bool isUnaryExpression,
 
   case tok::annot_template_id: { // [C++]          template-id
     TemplateIdAnnotation *TemplateId = takeTemplateIdAnnotation(Tok);
-    if (TemplateId->Kind == TNK_Type_template) {
+    if (TemplateId->Kind == TNK_Type_template
+//@@
+        || TemplateId->Kind == TNK_Dependent_template_name
+//@@
+		
+	) {
       // We have a template-id that we know refers to a type,
       // translate it into a type and continue parsing as a cast
       // expression.
@@ -1559,6 +1885,21 @@ Parser::ParsePostfixExpressionSuffix(ExprResult LHS) {
 
       break;
     }
+//@@
+	case tok::periodtilde: {
+      //@@@TODO: conflict between .~type .~value as a param declaration and .~var .~dtor expression (even within QQs)
+      if (getCurScope()->getQuasiQuotesParent())
+        return LHS;
+      //outside of QQ break the .~ token into . ~ to be used for a (pseudo-)destructor call
+      Token Tilde = Tok;
+      Tilde.setLocation(Tok.getLocation().getLocWithOffset(1));
+      Tilde.setKind(tok::tilde);
+      Tilde.setLength(1);
+      PP.EnterToken(Tilde);
+      Tok.setKind(tok::period);
+      Tok.setLength(1);
+	} //fallthrough
+//@@
     case tok::arrow:
     case tok::period: {
       // postfix-expression: p-e '->' template[opt] id-expression
@@ -1791,9 +2132,12 @@ ExprResult Parser::ParseUnaryExprOrTypeTraitExpression() {
       BalancedDelimiterTracker T(*this, tok::l_paren);
       T.consumeOpen();
       LParenLoc = T.getOpenLocation();
-      if (Tok.is(tok::identifier)) {
-        Name = Tok.getIdentifierInfo();
-        NameLoc = ConsumeToken();
+//@@was:
+      //if (Tok.is(tok::identifier)) {
+      //  Name = Tok.getIdentifierInfo();
+      //  NameLoc = ConsumeToken();
+      if (Tok.isIdentifier() && (Name = ParseIdentifier(&NameLoc))) {
+//@@
         T.consumeClose();
         RParenLoc = T.getCloseLocation();
         if (RParenLoc.isInvalid())
@@ -1802,9 +2146,13 @@ ExprResult Parser::ParseUnaryExprOrTypeTraitExpression() {
         Diag(Tok, diag::err_expected_parameter_pack);
         SkipUntil(tok::r_paren, StopAtSemi);
       }
-    } else if (Tok.is(tok::identifier)) {
-      Name = Tok.getIdentifierInfo();
-      NameLoc = ConsumeToken();
+    }
+//@@was:
+ //   else if (Tok.is(tok::identifier)) {
+ //     Name = Tok.getIdentifierInfo();
+ //     NameLoc = ConsumeToken();
+	else if (Tok.isIdentifier() && (Name = ParseIdentifier(&NameLoc))) {
+//@@
       LParenLoc = PP.getLocForEndOfToken(EllipsisLoc);
       RParenLoc = PP.getLocForEndOfToken(NameLoc);
       Diag(LParenLoc, diag::err_paren_sizeof_parameter_pack)
@@ -1997,7 +2345,7 @@ ExprResult Parser::ParseBuiltinPrimaryExpression() {
         } else {
           PT.consumeClose();
           Res = Actions.ActOnBuiltinOffsetOf(getCurScope(), StartLoc, TypeLoc,
-                                             Ty.get(), Comps,
+                                             Ty.get(), &Comps[0], Comps.size(),
                                              PT.getCloseLocation());
         }
         break;
