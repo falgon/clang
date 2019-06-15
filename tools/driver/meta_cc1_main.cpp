@@ -115,14 +115,14 @@ public:
 
 	bool TraverseMetaGeneratedIdentifier(const IdentifierInfo *II) {
 		assert(II->isMetaGenerated());
-		return getDerived().TraverseStmt(II->getFETokenInfo<Expr>());
+		return Base::getDerived().TraverseStmt(II->getFETokenInfo<Expr>());
 	}
 protected:
 	bool TryTraverseMetaGeneratedIdentifier(const IdentifierInfo *II) {
 		bool result = true;
 		if (II && II->isMetaGenerated() && processed.find(II) == processed.end()) {
 			processed.insert(II);
-			result = getDerived().TraverseMetaGeneratedIdentifier(II);
+			result = Base::getDerived().TraverseMetaGeneratedIdentifier(II);
 		}
 		return result;
 	}
@@ -352,7 +352,14 @@ private:
 
 StageResultRewriter::Inlines StageResultRewriter::inlines;
 
-#define META_API __declspec(dllexport)
+#ifdef _MSC_VER
+#   define META_API __declspec(dllexport)
+#elif defined(__GNUC__)
+#   define META_API __attribute__((visibility("default")))
+#else
+#   define META_API
+#   pragma warning Unknown dynamic link semantics.
+#endif
 
 META_API void __meta_inline(void* ast) {
 	StageResultRewriter::AddInline((QuotedElements*) ast);
